@@ -13,9 +13,9 @@ import {
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../config/firebase";
 import { useRouter } from "expo-router";
+import api from "../config/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { height } = Dimensions.get("window");
 
@@ -52,6 +52,7 @@ export default function LoginScreen() {
     }).start();
   };
 
+  // ✅ UPDATED: MongoDB login
   const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert("Missing Fields", "Please fill in all fields.");
@@ -59,26 +60,13 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const res = await api.post('/auth/login', { email, password });
+      await AsyncStorage.setItem('token', res.data.token);
+      await AsyncStorage.setItem('user', JSON.stringify(res.data.user));
       router.replace("/(tabs)/home");
     } catch (error: any) {
-      const code = error.code;
-      let message = "Something went wrong. Please try again.";
-
-      if (
-        code === "auth/user-not-found" ||
-        code === "auth/wrong-password" ||
-        code === "auth/invalid-credential" ||
-        code === "auth/invalid-email"
-      ) {
-        message = "Invalid email or password. Please try again.";
-      } else if (code === "auth/too-many-requests") {
-        message = "Too many failed attempts. Please try again later.";
-      } else if (code === "auth/network-request-failed") {
-        message = "No internet connection. Please check your network.";
-      }
-
-      Alert.alert("Login Failed", message);
+      const msg = error.response?.data?.message || 'Something went wrong. Please try again.';
+      Alert.alert("Login Failed", msg);
     } finally {
       setLoading(false);
     }
@@ -95,7 +83,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Hero Section ───────────────────────────────────────────── */}
+        {/* ── Hero Section ── */}
         <View style={styles.hero}>
           <Dot style={styles.dotTL} />
           <Dot style={styles.dotTR} />
@@ -119,7 +107,7 @@ export default function LoginScreen() {
           <Text style={styles.heroTagline}>Authentic Filipino Souvenirs</Text>
         </View>
 
-        {/* ── Form Card ──────────────────────────────────────────────── */}
+        {/* ── Form Card ── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Welcome</Text>
           <Text style={styles.cardSubtitle}>
@@ -219,7 +207,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#3D2314",
   },
-
   hero: {
     height: height * 0.42,
     backgroundColor: "#3D2314",
@@ -228,7 +215,6 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
-
   weaveRow1: {
     position: "absolute",
     top: 30,
@@ -245,7 +231,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "rgba(245,200,122,0.08)",
   },
-
   dot: {
     position: "absolute",
     borderRadius: 999,
@@ -264,12 +249,10 @@ const styles = StyleSheet.create({
     marginLeft: -100,
     backgroundColor: "rgba(255,255,255,0.03)",
   },
-
   emojiTL: { position: "absolute", top: 48, left: 28, fontSize: 22, opacity: 0.6 },
   emojiTR: { position: "absolute", top: 52, right: 32, fontSize: 20, opacity: 0.5 },
   emojiBL: { position: "absolute", bottom: 44, left: 36, fontSize: 18, opacity: 0.45 },
   emojiBR: { position: "absolute", bottom: 48, right: 28, fontSize: 20, opacity: 0.5 },
-
   logoCircle: {
     width: 72,
     height: 72,
@@ -282,7 +265,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   logoEmoji: { fontSize: 34 },
-
   heroTitle: {
     fontSize: 34,
     fontWeight: "800",
@@ -297,7 +279,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: "uppercase",
   },
-
   card: {
     flex: 1,
     backgroundColor: "#FDF8F5",
@@ -308,7 +289,6 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     marginTop: -24,
   },
-
   cardTitle: {
     fontSize: 26,
     fontWeight: "800",
@@ -322,7 +302,6 @@ const styles = StyleSheet.create({
     marginBottom: 28,
     fontWeight: "500",
   },
-
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
@@ -345,7 +324,6 @@ const styles = StyleSheet.create({
     color: "#2C1810",
     paddingVertical: 0,
   },
-
   loginBtn: {
     backgroundColor: "#3D2314",
     borderRadius: 14,
@@ -368,7 +346,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: -0.2,
   },
-
   dividerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -385,7 +362,6 @@ const styles = StyleSheet.create({
     color: "#B0927E",
     fontWeight: "500",
   },
-
   registerBtn: {
     borderRadius: 14,
     paddingVertical: 15,
@@ -400,7 +376,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-
   footerNote: {
     textAlign: "center",
     color: "#C4A898",

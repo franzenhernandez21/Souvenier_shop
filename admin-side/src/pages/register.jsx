@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-import { auth, db } from '../config/firebase';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import api from '../config/api';
 
 
 /* Reuse your Icon component if already global */
@@ -30,30 +28,20 @@ export default function AdminRegister() {
     e.preventDefault();
     setLoading(true);
     setMsg('');
-
     try {
-      // 🔹 Create user in Firebase Auth
-      const userCred = await createUserWithEmailAndPassword(auth, email, password);
-
-      // 🔹 Save admin data in Firestore
-      await setDoc(doc(db, "users", userCred.user.uid), {
+      await api.post('/auth/register', {
         name,
         email,
-        role: "admin",
-        createdAt: new Date()
+        password,
+        role: 'admin',
       });
-
       setMsg('✅ Admin account created successfully');
-
-      // Reset fields
       setEmail('');
       setPassword('');
       setName('');
-
     } catch (err) {
-      setMsg(`❌ ${err.message}`);
+      setMsg(`❌ ${err.response?.data?.message || err.message}`);
     }
-
     setLoading(false);
   };
 

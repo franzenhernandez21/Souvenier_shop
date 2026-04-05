@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { Stack, useRouter } from "expo-router";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../config/firebase";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CartProvider } from "../context/CartContext";
 import { FavoritesProvider } from "../context/FavoritesContext";
 
@@ -11,23 +10,26 @@ export default function RootLayout() {
   const [authResolved, setAuthResolved] = useState(false);
 
   useEffect(() => {
-    // Always use onAuthStateChanged — don't trust auth.currentUser synchronously
-    // because AsyncStorage (persistence) loads async
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        router.replace("/(tabs)/home" as any);
-      } else {
+    const checkAuth = async () => {
+      try {
+        const token = await AsyncStorage.getItem('token');
+        if (token) {
+          router.replace("/(tabs)/home" as any);
+        } else {
+          router.replace("/login" as any);
+        }
+      } catch (err) {
         router.replace("/login" as any);
+      } finally {
+        setAuthResolved(true);
       }
-      setAuthResolved(true);
-    });
-    return unsubscribe;
-  }, [router]);
+    };
+    checkAuth();
+  }, []);
 
   return (
     <FavoritesProvider>
       <CartProvider>
-        {/* Stack is ALWAYS mounted so router.replace() has a navigator to work with */}
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="login" options={{ headerShown: false }} />
@@ -36,7 +38,6 @@ export default function RootLayout() {
           <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
         </Stack>
 
-        {/* Splash sits on TOP as an overlay until auth is resolved */}
         {!authResolved && (
           <View style={[StyleSheet.absoluteFill, styles.splash]}>
             <ActivityIndicator size="large" color="#F5C87A" />
@@ -45,8 +46,8 @@ export default function RootLayout() {
       </CartProvider>
     </FavoritesProvider>
   );
-  
 }
+
 const styles = StyleSheet.create({
   splash: {
     flex: 1,

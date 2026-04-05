@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../config/firebase';
-import {
-  collection, onSnapshot, query, orderBy,
-  doc, updateDoc, serverTimestamp,
-} from 'firebase/firestore';
+import api from '../config/api';
 
 /* ─── Google Font ──────────────────────────────────────────────── */
 const fontLink = document.createElement('link');
@@ -71,30 +67,37 @@ export default function Orders() {
   const [search, setSearch]               = useState('');
   const [confirming, setConfirming]       = useState(false);
 
+  // ✅ UPDATED: Fetch from MongoDB
+  const fetchOrders = async () => {
+    try {
+      const res = await api.get('/orders');
+      setOrders(res.data);
+    } catch (err) {
+      console.error('Failed to fetch orders:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setOrders(data);
-      setLoading(false);
-      setSelectedOrder((prev) =>
-        prev ? data.find((o) => o.id === prev.id) || null : null
-      );
-    }, (error) => {
-      console.error('Orders listener error:', error);
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    fetchOrders();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchOrders, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  /* ── Confirm order: pending → processing ────────────────────── */
+  // ✅ UPDATED: Confirm order via API
   const handleConfirmOrder = async (orderId) => {
     try {
       setConfirming(true);
-      await updateDoc(doc(db, 'orders', orderId), {
+      await api.put(`/orders/${orderId}`, {
         status: 'processing',
-        confirmedAt: serverTimestamp(),
+        confirmedAt: new Date(),
       });
+      await fetchOrders();
+      setSelectedOrder(prev =>
+        prev ? { ...prev, status: 'processing' } : null
+      );
     } catch (err) {
       console.error('Failed to confirm order:', err);
     } finally {
@@ -107,16 +110,17 @@ export default function Orders() {
     const searchLower   = search.toLowerCase().trim();
     const matchesSearch = searchLower === '' ||
       (o.userEmail || '').toLowerCase().includes(searchLower) ||
-      o.id.toLowerCase().includes(searchLower) ||
-      o.id.toLowerCase().includes(searchLower.replace('#', ''));
+      (o._id || o.id || '').toLowerCase().includes(searchLower.replace('#', ''));
     return matchesStatus && matchesSearch;
   });
 
-  /* ── Date formatter ──────────────────────────────────────────── */
-  const fmtDate = (ts) =>
-    ts?.toDate
-      ? ts.toDate().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })
-      : null;
+  // ✅ UPDATED: Handle both MongoDB dates and regular dates
+  const fmtDate = (ts) => {
+    if (!ts) return null;
+    const date = ts?.toDate ? ts.toDate() : new Date(ts);
+    if (isNaN(date)) return null;
+    return date.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+  };
 
   const getDateReceivedDisplay = (order) => {
     const ts  = resolveDateReceived(order);
@@ -160,7 +164,7 @@ export default function Orders() {
       <div style={S.card}>
         {loading ? (
           <div style={S.emptyState}>
-            <p style={{ color: '#94A3B8', fontSize: 14 }}>Connecting to live orders...</p>
+            <p style={{ color: '#94A3B8', fontSize: 14 }}>Loading orders...</p>
           </div>
         ) : filteredOrders.length === 0 ? (
           <div style={S.emptyState}>
@@ -180,28 +184,23 @@ export default function Orders() {
               </thead>
               <tbody>
                 {filteredOrders.map((order) => {
-                  const datePlaced = order.createdAt?.toDate
-                    ? order.createdAt.toDate().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
-                    : '—';
-
+                  const orderId = order._id || order.id;
+                  const datePlaced = fmtDate(order.createdAt) || '—';
                   const dateReceivedTs  = resolveDateReceived(order);
                   const dateReceivedFmt = fmtDate(dateReceivedTs);
                   const dateReceivedStr = dateReceivedFmt
                     ? dateReceivedFmt
                     : order.status === 'completed' ? 'Not recorded' : '—';
                   const dateReceivedGreen = !!dateReceivedFmt;
-
                   const customerName = order.userEmail?.split('@')[0] || '—';
 
                   return (
-                    <tr key={order.id} style={S.tr}>
-                      {/* Order ID */}
+                    <tr key={orderId} style={S.tr}>
                       <td style={S.td}>
                         <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#5C4033', fontWeight: 700, background: '#FDF6F0', padding: '3px 8px', borderRadius: 6 }}>
-                          #{order.id.slice(0, 8)}
+                          #{orderId?.slice(0, 8)}
                         </span>
                       </td>
-                      {/* Customer */}
                       <td style={S.td}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div style={{
@@ -218,42 +217,32 @@ export default function Orders() {
                           </div>
                         </div>
                       </td>
-                      {/* Items */}
                       <td style={S.td}>
                         <span style={{ fontSize: 12, color: '#374151', fontWeight: 700 }}>
                           {order.items?.length || 0} item{order.items?.length !== 1 ? 's' : ''}
                         </span>
                       </td>
-                      {/* Total */}
                       <td style={S.td}>
                         <span style={{ fontSize: 13, fontWeight: 800, color: '#5C4033' }}>
                           ₱{(order.grandTotal || 0).toLocaleString()}
                         </span>
                       </td>
-                      {/* Payment */}
                       <td style={S.td}>
                         <span style={{ fontSize: 11, color: '#64748B', fontWeight: 600, background: '#F8FAFC', padding: '3px 8px', borderRadius: 6 }}>
                           {order.paymentMethod === 'cod' ? '💵 COD' : '📱 GCash'}
                         </span>
                       </td>
-                      {/* Date Placed */}
                       <td style={S.td}>
                         <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>{datePlaced}</span>
                       </td>
-                      {/* Date Received */}
                       <td style={S.td}>
-                        <span style={{
-                          fontSize: 11, fontWeight: 600,
-                          color: dateReceivedGreen ? '#15803D' : '#94A3B8',
-                        }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: dateReceivedGreen ? '#15803D' : '#94A3B8' }}>
                           {dateReceivedStr}
                         </span>
                       </td>
-                      {/* Status */}
                       <td style={S.td}>
                         <StatusPill status={order.status} />
                       </td>
-                      {/* Action */}
                       <td style={S.td}>
                         <button onClick={() => setSelectedOrder(order)} style={S.viewBtn}>
                           <Icon name="eye" size={13} color="#fff" />
@@ -272,6 +261,7 @@ export default function Orders() {
       {/* ── Order Modal ─────────────────────────────────────────── */}
       {selectedOrder && (() => {
         const drDisplay = getDateReceivedDisplay(selectedOrder);
+        const orderId = selectedOrder._id || selectedOrder.id;
         return (
           <div style={S.modalOverlay} onClick={() => setSelectedOrder(null)}>
             <div style={S.modalBox} onClick={(e) => e.stopPropagation()}>
@@ -281,7 +271,7 @@ export default function Orders() {
                 <div>
                   <h2 style={S.modalTitle}>Order Details</h2>
                   <p style={S.modalOrderId}>
-                    Order <span style={{ fontFamily: 'monospace', color: '#5C4033', fontWeight: 700 }}>#{selectedOrder.id}</span>
+                    Order <span style={{ fontFamily: 'monospace', color: '#5C4033', fontWeight: 700 }}>#{orderId}</span>
                   </p>
                 </div>
                 <button onClick={() => setSelectedOrder(null)} style={S.closeBtn}>
@@ -292,32 +282,14 @@ export default function Orders() {
               {/* Info Row */}
               <div style={S.modalInfoRow}>
                 {[
-                  {
-                    label: 'Customer',
-                    value: selectedOrder.userEmail?.split('@')[0] || '—',
-                    sub: selectedOrder.userEmail || '',
-                  },
-                  {
-                    label: 'Date Placed',
-                    value: fmtDate(selectedOrder.createdAt) || '—',
-                  },
-                  {
-                    label: 'Date Received',
-                    value: drDisplay.value,
-                    green: drDisplay.green,
-                    orange: drDisplay.orange,
-                  },
-                  {
-                    label: 'Payment',
-                    value: selectedOrder.paymentMethod === 'cod' ? '💵 Cash on Delivery' : '📱 GCash',
-                  },
+                  { label: 'Customer', value: selectedOrder.userEmail?.split('@')[0] || '—', sub: selectedOrder.userEmail || '' },
+                  { label: 'Date Placed', value: fmtDate(selectedOrder.createdAt) || '—' },
+                  { label: 'Date Received', value: drDisplay.value, green: drDisplay.green, orange: drDisplay.orange },
+                  { label: 'Payment', value: selectedOrder.paymentMethod === 'cod' ? '💵 Cash on Delivery' : '📱 GCash' },
                 ].map((item) => (
                   <div key={item.label} style={S.modalInfoItem}>
                     <span style={S.modalInfoLabel}>{item.label}</span>
-                    <span style={{
-                      fontSize: 13, fontWeight: 700,
-                      color: item.green ? '#15803D' : item.orange ? '#C2410C' : '#1A1A2E',
-                    }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: item.green ? '#15803D' : item.orange ? '#C2410C' : '#1A1A2E' }}>
                       {item.value}
                     </span>
                     {item.sub && <span style={{ fontSize: 10, color: '#94A3B8' }}>{item.sub}</span>}
@@ -332,8 +304,6 @@ export default function Orders() {
                   <StatusPill status={selectedOrder.status} />
                 </div>
               </div>
-
-
 
               {/* Items */}
               <div style={S.modalSection}>
@@ -380,24 +350,20 @@ export default function Orders() {
                 </div>
               </div>
 
-              {/* Confirm Order Button — small, bottom-left, pending only */}
+              {/* Confirm Order Button */}
               {selectedOrder.status === 'pending' && (
                 <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <button
-                    onClick={() => handleConfirmOrder(selectedOrder.id)}
+                    onClick={() => handleConfirmOrder(orderId)}
                     disabled={confirming}
                     style={{
                       padding: '8px 18px',
                       background: confirming ? '#CBD5E1' : 'linear-gradient(135deg,#5C4033,#8B6355)',
-                      border: 'none',
-                      borderRadius: 8,
-                      color: '#fff',
-                      fontSize: 12,
-                      fontWeight: 700,
+                      border: 'none', borderRadius: 8,
+                      color: '#fff', fontSize: 12, fontWeight: 700,
                       cursor: confirming ? 'not-allowed' : 'pointer',
                       boxShadow: confirming ? 'none' : '0 3px 8px rgba(92,64,51,0.25)',
-                      fontFamily: 'Nunito, sans-serif',
-                      transition: 'all 0.2s',
+                      fontFamily: 'Nunito, sans-serif', transition: 'all 0.2s',
                     }}
                   >
                     {confirming ? 'Confirming...' : 'Confirm Order'}

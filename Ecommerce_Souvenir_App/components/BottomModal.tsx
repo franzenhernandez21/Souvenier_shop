@@ -18,7 +18,7 @@ import { useRouter } from "expo-router";
 type Product = {
   id: string;
   name: string;
-  price: string;
+  price: string | number;
   image: string;
   category: string;
   rating: string;
@@ -72,7 +72,9 @@ export default function BottomModal({ visible, product, onClose, mode }: Props) 
 
   if (!product) return null;
 
-  const unitPrice = parseInt(product.price.replace("₱", "").replace(",", ""));
+const unitPrice = typeof product.price === 'number'
+  ? product.price
+  : parseInt(String(product.price).replace("₱", "").replace(",", ""));
   const totalPrice = unitPrice * quantity;
 
   // ── Decrement stock in Firestore ─────────────────────────────────────────

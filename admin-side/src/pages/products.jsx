@@ -1,8 +1,26 @@
-import React, { useEffect, useState } from 'react';
-import { db } from '../config/firebase';
-import {
-  collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy,
-} from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import api from '../config/api';
+
+/* ─── Google Font ──────────────────────────────────────────────── */
+const fontLink = document.createElement('link');
+fontLink.href = 'https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&display=swap';
+fontLink.rel = 'stylesheet';
+if (!document.head.querySelector('[href*="Nunito"]')) document.head.appendChild(fontLink);
+
+/* ─── SVG Icon ─────────────────────────────────────────────────── */
+const Icon = ({ name, size = 18, color = 'currentColor', strokeWidth = 1.8 }) => {
+  const paths = {
+    eye: <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>,
+    shoppingBag: <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" x2="21" y1="6" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></>,
+    x: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      {paths[name]}
+    </svg>
+  );
+};
 
 const categories = ['crafts', 'clothing', 'food', 'decor'];
 
@@ -39,14 +57,13 @@ function ReviewsModal({ product, onClose, reviews }) {
   return (
     <div style={RS.overlay}>
       <div style={RS.modal}>
-
-        {/* Header */}
         <div style={RS.header}>
           <div style={RS.headerLeft}>
             <div style={RS.productThumb}>
               {product.image
                 ? <img src={product.image} alt={product.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10 }} />
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10 }}
+                    onError={(e) => { e.target.style.display = 'none'; }} />
                 : <span style={{ fontSize: 22 }}>🛍️</span>}
             </div>
             <div>
@@ -57,7 +74,6 @@ function ReviewsModal({ product, onClose, reviews }) {
           <button style={RS.closeBtn} onClick={onClose}>✕</button>
         </div>
 
-        {/* Overall Rating Summary */}
         <div style={RS.ratingSummary}>
           <div style={RS.ratingBig}>
             <span style={RS.ratingNumber}>{avgRating > 0 ? avgRating.toFixed(1) : '—'}</span>
@@ -68,8 +84,6 @@ function ReviewsModal({ product, onClose, reviews }) {
               </span>
             </div>
           </div>
-
-          {/* Star breakdown */}
           <div style={RS.breakdown}>
             {[5, 4, 3, 2, 1].map((star) => {
               const count = reviews.filter((r) => Math.round(r.rating) === star).length;
@@ -87,7 +101,6 @@ function ReviewsModal({ product, onClose, reviews }) {
           </div>
         </div>
 
-        {/* Reviews List */}
         <div style={RS.reviewsList}>
           {reviews.length === 0 ? (
             <div style={RS.empty}>
@@ -124,7 +137,6 @@ function ReviewsModal({ product, onClose, reviews }) {
               ))
           )}
         </div>
-
       </div>
     </div>
   );
@@ -147,45 +159,42 @@ export default function Products() {
   const [reviewProduct, setReviewProduct] = useState(null);
   const [reviewsMap, setReviewsMap] = useState({});
 
+  /* ── Helper: get consistent ID ── */
+  const getId = (product) => product._id || product.id;
 
   useEffect(() => {
-    const q = query(collection(db, 'products'), orderBy('name'));
-    const unsubscribe = onSnapshot(q,
-      (snapshot) => {
-        setProducts(snapshot.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          reviews: reviewsMap[d.id] || [],
-        };
-      }));
-        setLoading(false);
-      },
-      (error) => { console.error(error); setLoading(false); }
-    );
-    return () => unsubscribe();
-  }, [reviewsMap]);
+    fetchProducts();
+  }, []);
 
   useEffect(() => {
-  const unsubscribe = onSnapshot(collection(db, 'reviews'), (snapshot) => {
-    const map = {};
+    const fetchReviews = async () => {
+      try {
+        const res = await api.get('/reviews');
+        const map = {};
+        res.data.forEach((review) => {
+          const pid = review.productId;
+          if (!pid) return;
+          if (!map[pid]) map[pid] = [];
+          map[pid].push(review);
+        });
+        setReviewsMap(map);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchReviews();
+  }, []);
 
-    snapshot.docs.forEach((doc) => {
-      const data = doc.data();
-      const pid = data.productId;
-
-      if (!pid) return;
-
-      if (!map[pid]) map[pid] = [];
-      map[pid].push({ id: doc.id, ...data });
-    });
-
-    setReviewsMap(map);
-  });
-
-  return () => unsubscribe();
-}, []);
+  const fetchProducts = async () => {
+    try {
+      const res = await api.get('/products');
+      setProducts(res.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleOpenAdd = () => {
     setEditingProduct(null);
@@ -200,10 +209,10 @@ export default function Products() {
     setEditingProduct(product);
     setForm({
       name: product.name,
-      price: product.price.replace('₱', ''),
+      price: String(product.price),
       category: product.category,
       description: product.description,
-      stock: product.stock.toString(),
+      stock: String(product.stock),
     });
     setImageFile(null);
     setImagePreview(product.image || '');
@@ -211,23 +220,55 @@ export default function Products() {
     setShowModal(true);
   };
 
+  /* ✅ Helper: Convert any image to JPG para siguradong gagana sa React Native */
+  const convertToJpg = (file) => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new window.Image();
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob((blob) => {
+          resolve(new File([blob], 'image.jpg', { type: 'image/jpeg' }));
+        }, 'image/jpeg', 0.92);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  /* ✅ FIXED: Gumagamit ng data.data.url — pinaka-reliable na field sa ImgBB */
   const uploadImage = async (file) => {
     const API_KEY = '041fc834bd83e283520a7c5e4dc9fe3e';
+    // ✅ CONVERT to JPG para siguradong gagana sa React Native
+    const convertedFile = await convertToJpg(file);
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('image', convertedFile);
     setUploading(true);
     setUploadProgress(30);
     try {
       const response = await fetch(`https://api.imgbb.com/1/upload?key=${API_KEY}`, {
-        method: 'POST', body: formData,
+        method: 'POST',
+        body: formData,
       });
       const data = await response.json();
       setUploadProgress(100);
       setUploading(false);
-      if (data.success) return data.data.url;
-      else throw new Error('Upload failed');
+
+      console.log('ImgBB response:', data); // ← para makita mo ang buong response
+
+      if (data.success) {
+        // ✅ FIXED: data.data.url ang tamang field, hindi display_url
+        const imageUrl = data.data.url;
+        console.log('Image URL saved:', imageUrl);
+        return imageUrl;
+      } else {
+        throw new Error('ImgBB upload failed: ' + JSON.stringify(data));
+      }
     } catch (error) {
       setUploading(false);
+      console.error('Upload error:', error);
       throw error;
     }
   };
@@ -245,29 +286,37 @@ export default function Products() {
     try {
       let imageUrl = editingProduct?.image || '';
       if (imageFile) imageUrl = await uploadImage(imageFile);
+
       const productData = {
         name: form.name,
-        price: `₱${form.price}`,
+        price: parseFloat(form.price),
         category: form.category,
         description: form.description,
         stock: parseInt(form.stock),
         image: imageUrl,
       };
+
+      console.log('Saving product with data:', productData); // ← debug
+
       if (editingProduct) {
-        await updateDoc(doc(db, 'products', editingProduct.id), productData);
+        await api.put(`/products/${getId(editingProduct)}`, productData);
       } else {
-        await addDoc(collection(db, 'products'), productData);
+        await api.post('/products', productData);
       }
+
+      await fetchProducts();
       setShowModal(false);
     } catch (err) {
-      alert('Error: ' + err.message);
+      alert('Error saving product: ' + err.message);
+      console.error('Save error:', err);
     }
     setSaving(false);
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (product) => {
     try {
-      await deleteDoc(doc(db, 'products', id));
+      await api.delete(`/products/${getId(product)}`);
+      setProducts(prev => prev.filter(p => getId(p) !== getId(product)));
       setDeleteConfirm(null);
     } catch (err) {
       alert('Error deleting product: ' + err.message);
@@ -280,16 +329,13 @@ export default function Products() {
     return matchesSearch && matchesCategory;
   });
 
-  const getProductReviews = (productId) => {
-  return reviewsMap[productId] || [];
-};
+  const getProductReviews = (productId) => reviewsMap[productId] || [];
 
   const getAvgRating = (product) => {
-  const reviews = getProductReviews(product.id);
-  if (!reviews.length) return null;
-
-  return reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length;
-};
+    const reviews = getProductReviews(getId(product));
+    if (!reviews.length) return null;
+    return reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length;
+  };
 
   return (
     <div style={styles.container}>
@@ -329,14 +375,16 @@ export default function Products() {
         {loading ? (
           <div style={styles.emptyState}>
             <div style={styles.spinner}>⟳</div>
-            <p style={styles.emptyText}>Connecting to real-time data...</p>
+            <p style={styles.emptyText}>Loading products...</p>
           </div>
         ) : filteredProducts.length === 0 ? (
           <div style={styles.emptyState}>
             <span style={styles.emptyIcon}>🛍️</span>
             <p style={styles.emptyTitle}>No products found</p>
             <p style={styles.emptyText}>
-              {search || selectedCategory !== 'all' ? 'Try adjusting your filters' : 'Add your first product to get started'}
+              {search || selectedCategory !== 'all'
+                ? 'Try adjusting your filters'
+                : 'Add your first product to get started'}
             </p>
             {!search && selectedCategory === 'all' && (
               <button style={styles.addButton} onClick={handleOpenAdd}>+ Add Product</button>
@@ -354,13 +402,12 @@ export default function Products() {
             <tbody>
               {filteredProducts.map((product, index) => {
                 const avg = getAvgRating(product);
-                const reviewCount = getProductReviews(product.id).length;
+                const reviewCount = getProductReviews(getId(product)).length;
                 return (
                   <tr
-                    key={product.id}
+                    key={getId(product)}
                     style={{ ...styles.tr, backgroundColor: index % 2 === 0 ? '#fff' : '#FAFAFA' }}
                   >
-                    {/* Product — clickable to open reviews */}
                     <td style={styles.td}>
                       <div
                         style={{ ...styles.productCell, cursor: 'pointer' }}
@@ -368,9 +415,18 @@ export default function Products() {
                         title="Click to view reviews"
                       >
                         <div style={styles.productThumb}>
-                          {product.image
-                            ? <img src={product.image} alt={product.name} style={styles.thumbImg} />
-                            : <span style={{ fontSize: '22px' }}>🛍️</span>}
+                          {product.image ? (
+                            <img
+                              src={product.image}
+                              alt={product.name}
+                              style={styles.thumbImg}
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <span style={{ fontSize: '22px' }}>🛍️</span>
+                          )}
                         </div>
                         <div>
                           <p style={{ ...styles.productName, color: '#5C4033', textDecoration: 'underline dotted' }}>
@@ -389,7 +445,9 @@ export default function Products() {
                     </td>
 
                     <td style={styles.td}>
-                      <span style={styles.priceText}>{product.price}</span>
+                      <span style={styles.priceText}>
+                        ₱{Number(product.price).toLocaleString()}
+                      </span>
                     </td>
 
                     <td style={styles.td}>
@@ -403,7 +461,6 @@ export default function Products() {
                       </span>
                     </td>
 
-                    {/* Rating */}
                     <td style={styles.td}>
                       {avg !== null ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -435,7 +492,7 @@ export default function Products() {
       {reviewProduct && (
         <ReviewsModal
           product={reviewProduct}
-          reviews={getProductReviews(reviewProduct.id)}
+          reviews={getProductReviews(getId(reviewProduct))}
           onClose={() => setReviewProduct(null)}
         />
       )}
@@ -505,7 +562,10 @@ export default function Products() {
                       <input type="file" accept="image/*" style={{ display: 'none' }}
                         onChange={(e) => {
                           const file = e.target.files[0];
-                          if (file) { setImageFile(file); setImagePreview(URL.createObjectURL(file)); }
+                          if (file) {
+                            setImageFile(file);
+                            setImagePreview(URL.createObjectURL(file));
+                          }
                         }} />
                       <span style={styles.uploadIcon}>📁</span>
                       <p style={styles.uploadText}>Click to upload image</p>
@@ -528,7 +588,8 @@ export default function Products() {
               <button style={styles.cancelBtn} onClick={() => setShowModal(false)}>Cancel</button>
               <button
                 style={{ ...styles.saveBtn, ...(saving ? styles.saveBtnDisabled : {}) }}
-                onClick={handleSave} disabled={saving}
+                onClick={handleSave}
+                disabled={saving}
               >
                 {saving ? 'Saving...' : editingProduct ? 'Save Changes' : '+ Add Product'}
               </button>
@@ -551,7 +612,7 @@ export default function Products() {
             </p>
             <div style={styles.deleteBtns}>
               <button style={styles.cancelBtn} onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button style={styles.confirmDeleteBtn} onClick={() => handleDelete(deleteConfirm.id)}>
+              <button style={styles.confirmDeleteBtn} onClick={() => handleDelete(deleteConfirm)}>
                 Yes, Delete
               </button>
             </div>
@@ -579,8 +640,7 @@ const RS = {
   },
   header: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '20px 24px', borderBottom: '1px solid #F1F5F9',
-    flexShrink: 0,
+    padding: '20px 24px', borderBottom: '1px solid #F1F5F9', flexShrink: 0,
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 12 },
   productThumb: {
@@ -595,42 +655,24 @@ const RS = {
     width: 32, height: 32, borderRadius: 8, border: 'none',
     backgroundColor: '#F1F5F9', cursor: 'pointer', fontSize: 14, color: '#64748B',
   },
-
   ratingSummary: {
     display: 'flex', alignItems: 'center', gap: 24,
     padding: '20px 24px', backgroundColor: '#FAFAFA',
     borderBottom: '1px solid #F1F5F9', flexShrink: 0,
   },
   ratingBig: { display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 },
-  ratingNumber: {
-    fontSize: 44, fontWeight: 900, color: '#1A1A2E',
-    lineHeight: 1, fontFamily: 'Nunito, sans-serif',
-  },
+  ratingNumber: { fontSize: 44, fontWeight: 900, color: '#1A1A2E', lineHeight: 1, fontFamily: 'Nunito, sans-serif' },
   ratingCount: { fontSize: 12, color: '#94A3B8', fontWeight: 600 },
-
   breakdown: { flex: 1, display: 'flex', flexDirection: 'column', gap: 5 },
   breakdownRow: { display: 'flex', alignItems: 'center', gap: 8 },
   breakdownStar: { fontSize: 11, color: '#F59E0B', fontWeight: 700, width: 30, flexShrink: 0 },
-  breakdownBar: {
-    flex: 1, height: 6, backgroundColor: '#E5E7EB', borderRadius: 100, overflow: 'hidden',
-  },
-  breakdownFill: {
-    height: '100%', backgroundColor: '#F59E0B', borderRadius: 100,
-    transition: 'width 0.3s ease',
-  },
+  breakdownBar: { flex: 1, height: 6, backgroundColor: '#E5E7EB', borderRadius: 100, overflow: 'hidden' },
+  breakdownFill: { height: '100%', backgroundColor: '#F59E0B', borderRadius: 100, transition: 'width 0.3s ease' },
   breakdownCount: { fontSize: 11, color: '#94A3B8', fontWeight: 600, width: 16, textAlign: 'right' },
-
-  reviewsList: {
-    flex: 1, overflowY: 'auto', padding: '16px 24px',
-    display: 'flex', flexDirection: 'column', gap: 12,
-  },
-  empty: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    padding: '40px 0', gap: 8,
-  },
+  reviewsList: { flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12 },
+  empty: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', gap: 8 },
   emptyTitle: { fontSize: 15, fontWeight: 700, color: '#374151', margin: 0 },
   emptyText: { fontSize: 13, color: '#94A3B8', margin: 0 },
-
   reviewCard: {
     backgroundColor: '#F8FAFC', borderRadius: 12, padding: '14px 16px',
     border: '1px solid #F1F5F9', display: 'flex', flexDirection: 'column', gap: 8,
@@ -640,8 +682,7 @@ const RS = {
     width: 34, height: 34, borderRadius: '50%',
     backgroundColor: '#5C4033', color: '#fff',
     display: 'flex', justifyContent: 'center', alignItems: 'center',
-    fontSize: 14, fontWeight: 800, flexShrink: 0,
-    fontFamily: 'Nunito, sans-serif',
+    fontSize: 14, fontWeight: 800, flexShrink: 0, fontFamily: 'Nunito, sans-serif',
   },
   reviewMeta: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
   reviewName: { fontSize: 13, fontWeight: 700, color: '#1A1A2E' },
@@ -695,11 +736,15 @@ const styles = {
   td: { padding: '14px 20px', fontSize: '14px', color: '#374151', borderBottom: '1px solid #F8FAFC', verticalAlign: 'middle' },
   productCell: { display: 'flex', alignItems: 'center', gap: '12px' },
   productThumb: {
-    width: '44px', height: '44px', borderRadius: '10px',
+    width: '48px', height: '48px', borderRadius: '10px',
     backgroundColor: '#FDF6F0', border: '1px solid #F0E0D6',
-    overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0,
+    overflow: 'hidden', display: 'flex', justifyContent: 'center',
+    alignItems: 'center', flexShrink: 0,
   },
-  thumbImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  thumbImg: {
+    width: '100%', height: '100%', objectFit: 'cover',
+    display: 'block', borderRadius: '10px',
+  },
   productName: { fontSize: '14px', fontWeight: '600', color: '#1A1A2E', margin: 0 },
   productDesc: { fontSize: '12px', color: '#94A3B8', margin: 0 },
   categoryBadge: {

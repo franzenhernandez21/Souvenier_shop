@@ -13,10 +13,9 @@ import {
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../config/firebase";
 import { useRouter } from "expo-router";
+import api from "../config/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { height } = Dimensions.get("window");
 
@@ -55,6 +54,7 @@ export default function RegisterScreen() {
     }).start();
   };
 
+  // ✅ UPDATED: MongoDB register
   const handleRegister = async () => {
     if (!name || !email || !password || !confirmPassword) {
       Alert.alert("Missing Fields", "Please fill in all fields.");
@@ -70,20 +70,19 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-
-      await setDoc(doc(db, "users", user.uid), {
+      const res = await api.post('/auth/register', {
         name,
         email,
-        role: "buyer",
-        createdAt: new Date(),
+        password,
+        role: 'user',
       });
-
+      await AsyncStorage.setItem('token', res.data.token || '');
+      await AsyncStorage.setItem('user', JSON.stringify(res.data.user || {}));
       Alert.alert("Welcome!", "Your account has been created.");
       router.push("/login");
     } catch (error: any) {
-      Alert.alert("Registration Failed", error.message);
+      const msg = error.response?.data?.message || error.message;
+      Alert.alert("Registration Failed", msg);
     } finally {
       setLoading(false);
     }
@@ -100,18 +99,15 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Compact Hero ───────────────────────────────────────────── */}
+        {/* ── Compact Hero ── */}
         <View style={styles.hero}>
-          {/* Decorative circles */}
           <View style={styles.dotTL} />
           <View style={styles.dotBR} />
 
-          {/* Floating emojis */}
           <Text style={styles.emojiTL}>🧶</Text>
           <Text style={styles.emojiTR}>🎀</Text>
           <Text style={styles.emojiBR}>🌺</Text>
 
-          {/* Logo mark */}
           <View style={styles.logoCircle}>
             <Text style={styles.logoEmoji}>🛍️</Text>
           </View>
@@ -120,7 +116,7 @@ export default function RegisterScreen() {
           <Text style={styles.heroTagline}>Discover authentic Filipino crafts</Text>
         </View>
 
-        {/* ── Form Card ──────────────────────────────────────────────── */}
+        {/* ── Form Card ── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Create account</Text>
           <Text style={styles.cardSubtitle}>Be a member and support your local goods</Text>
@@ -235,13 +231,9 @@ export default function RegisterScreen() {
               activeOpacity={1}
               disabled={loading}
             >
-              {loading ? (
-                <Text style={styles.registerBtnText}>Creating account...</Text>
-              ) : (
-                <>
-                  <Text style={styles.registerBtnText}>Create Account</Text>
-                </>
-              )}
+              <Text style={styles.registerBtnText}>
+                {loading ? "Creating account..." : "Create Account"}
+              </Text>
             </TouchableOpacity>
           </Animated.View>
 
@@ -271,8 +263,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#3D2314",
   },
-
-  // ── Compact Hero ──────────────────────────────────────────────────
   hero: {
     height: height * 0.33,
     backgroundColor: "#3D2314",
@@ -281,7 +271,6 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
-
   dotTL: {
     position: "absolute",
     width: 120,
@@ -300,23 +289,9 @@ const styles = StyleSheet.create({
     bottom: -60,
     right: -40,
   },
-
   emojiTL: { position: "absolute", top: 52, left: 32, fontSize: 20, opacity: 0.5 },
   emojiTR: { position: "absolute", top: 48, right: 28, fontSize: 20, opacity: 0.5 },
   emojiBR: { position: "absolute", bottom: 36, right: 36, fontSize: 18, opacity: 0.4 },
-
-  backBtn: {
-    position: "absolute",
-    top: 52,
-    left: 20,
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
   logoCircle: {
     width: 60,
     height: 60,
@@ -329,7 +304,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   logoEmoji: { fontSize: 28 },
-
   heroTitle: {
     fontSize: 28,
     fontWeight: "800",
@@ -344,8 +318,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
   },
-
-  // ── Card ──────────────────────────────────────────────────────────
   card: {
     flex: 1,
     backgroundColor: "#FDF8F5",
@@ -356,7 +328,6 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     marginTop: -24,
   },
-
   cardTitle: {
     fontSize: 24,
     fontWeight: "800",
@@ -370,8 +341,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     fontWeight: "500",
   },
-
-  // Inputs
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
@@ -393,8 +362,6 @@ const styles = StyleSheet.create({
     color: "#2C1810",
     paddingVertical: 0,
   },
-
-  // Register button
   registerBtn: {
     backgroundColor: "#3D2314",
     borderRadius: 14,
@@ -417,8 +384,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: -0.2,
   },
-
-  // Divider
   dividerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -435,8 +400,6 @@ const styles = StyleSheet.create({
     color: "#B0927E",
     fontWeight: "500",
   },
-
-  // Login button (outlined)
   loginBtn: {
     borderRadius: 14,
     paddingVertical: 15,
@@ -451,7 +414,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-
   footerNote: {
     textAlign: "center",
     color: "#C4A898",

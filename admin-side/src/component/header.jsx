@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { auth, db } from '../config/firebase';
-import { doc, getDoc, setDoc, } from 'firebase/firestore';
-import { updatePassword, verifyBeforeUpdateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { useLocation } from 'react-router-dom';
+import api from '../config/api';
 
 /* ─── SVG Icons ────────────────────────────────────────────────── */
 const Icon = ({ name, size = 18, color = 'currentColor', strokeWidth = 1.8 }) => {
@@ -73,9 +71,7 @@ const M = {
   modalHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22,
   },
-  modalTitle: {
-    fontSize: 17, fontWeight: 900, color: '#1A1A2E', margin: 0,
-  },
+  modalTitle: { fontSize: 17, fontWeight: 900, color: '#1A1A2E', margin: 0 },
   closeBtn: {
     background: '#F8FAFC', border: '1px solid #F1F5F9', borderRadius: 8,
     width: 32, height: 32, cursor: 'pointer',
@@ -84,7 +80,7 @@ const M = {
 };
 
 /* ─── Input Field ──────────────────────────────────────────────── */
-function Field({ label, icon, type = 'text', value, onChange, placeholder, action }) {
+function Field({ label, icon, type = 'text', value, onChange, placeholder }) {
   const [show, setShow] = useState(false);
   const isPassword = type === 'password';
   return (
@@ -115,9 +111,7 @@ const F = {
     border: '1.5px solid #EDD9CC', borderRadius: 10,
     background: '#FDF8F5', overflow: 'hidden',
   },
-  iconLeft: {
-    padding: '0 10px', display: 'flex', alignItems: 'center', flexShrink: 0,
-  },
+  iconLeft: { padding: '0 10px', display: 'flex', alignItems: 'center', flexShrink: 0 },
   input: {
     flex: 1, border: 'none', background: 'transparent',
     padding: '10px 0', fontSize: 13, color: '#1A1A2E', fontWeight: 600,
@@ -153,11 +147,11 @@ const SB = {
 
 /* ─── Change Password Modal ────────────────────────────────────── */
 function ChangePasswordModal({ onClose }) {
-  const [current, setCurrent]   = useState('');
-  const [newPwd, setNewPwd]     = useState('');
-  const [confirm, setConfirm]   = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [current, setCurrent] = useState('');
+  const [newPwd, setNewPwd]   = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError]     = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
     setError('');
@@ -165,21 +159,22 @@ function ChangePasswordModal({ onClose }) {
     if (newPwd.length < 6)  { setError("Password must be at least 6 characters."); return; }
     setLoading(true);
     try {
-      const user = auth.currentUser;
-      const cred = EmailAuthProvider.credential(user.email, current);
-      await reauthenticateWithCredential(user, cred);
-      await updatePassword(user, newPwd);
+      const user = JSON.parse(localStorage.getItem('user'));
+      await api.put(`/users/${user.id}`, {
+        currentPassword: current,
+        newPassword: newPwd,
+      });
       onClose();
     } catch (e) {
-      setError(e.message || 'Failed to update password.');
+      setError(e.response?.data?.message || 'Failed to update password.');
     } finally { setLoading(false); }
   };
 
   return (
     <Modal title="Change Password" onClose={onClose}>
-      <Field label="CURRENT PASSWORD"  icon="lock" type="password" value={current}  onChange={e => setCurrent(e.target.value)}  placeholder="Enter current password" />
-      <Field label="NEW PASSWORD"      icon="lock" type="password" value={newPwd}   onChange={e => setNewPwd(e.target.value)}   placeholder="Enter new password" />
-      <Field label="CONFIRM PASSWORD"  icon="lock" type="password" value={confirm}  onChange={e => setConfirm(e.target.value)}  placeholder="Confirm new password" />
+      <Field label="CURRENT PASSWORD" icon="lock" type="password" value={current} onChange={e => setCurrent(e.target.value)} placeholder="Enter current password" />
+      <Field label="NEW PASSWORD"     icon="lock" type="password" value={newPwd}  onChange={e => setNewPwd(e.target.value)}  placeholder="Enter new password" />
+      <Field label="CONFIRM PASSWORD" icon="lock" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Confirm new password" />
       {error && <p style={{ color: '#E53935', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>{error}</p>}
       <SaveBtn label="Update Password" onClick={handleSave} loading={loading} />
     </Modal>
@@ -188,43 +183,30 @@ function ChangePasswordModal({ onClose }) {
 
 /* ─── Manage Account Modal ─────────────────────────────────────── */
 function ManageAccountModal({ onClose, sellerName, setSellerName }) {
-  const [name,    setName]    = useState(sellerName || '');
-  const [email,   setEmail]   = useState(auth.currentUser?.email || '');
-  const [pwdConfirm, setPwdConfirm] = useState('');
-  const [error,   setError]   = useState('');
+  const user = JSON.parse(localStorage.getItem('user'));
+  const [name,  setName]  = useState(sellerName || '');
+  const [email, setEmail] = useState(user?.email || '');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
     setError('');
     setLoading(true);
     try {
-      const user = auth.currentUser;
-      if (email !== user.email) {
-      const cred = EmailAuthProvider.credential(user.email, pwdConfirm);
-      await reauthenticateWithCredential(user, cred);
-      await verifyBeforeUpdateEmail(user, email);
-      // Don't close modal, show a message instead
-      setError(''); 
-      alert('A verification link has been sent to ' + email + '. Please verify it to complete the email change.');
-      onClose();
-      return;
-    }
-      await setDoc(doc(db, 'users', user.uid), { name }, { merge: true });
+      await api.put(`/users/${user.id}`, { name, email });
+      const updatedUser = { ...user, name, email };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
       setSellerName(name);
       onClose();
     } catch (e) {
-      setError(e.message || 'Failed to update account.');
+      setError(e.response?.data?.message || 'Failed to update account.');
     } finally { setLoading(false); }
   };
 
   return (
     <Modal title="Manage Account" onClose={onClose}>
-      <Field label="DISPLAY NAME" icon="user"  value={name}  onChange={e => setName(e.target.value)}  placeholder="Your name" />
-      <Field label="EMAIL"        icon="mail"  value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" />
-      {email !== auth.currentUser?.email && (
-        <Field label="CONFIRM PASSWORD (to change email)" icon="lock" type="password"
-          value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} placeholder="Current password" />
-      )}
+      <Field label="DISPLAY NAME" icon="user" value={name}  onChange={e => setName(e.target.value)}  placeholder="Your name" />
+      <Field label="EMAIL"        icon="mail" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" />
       {error && <p style={{ color: '#E53935', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>{error}</p>}
       <SaveBtn label="Save Changes" onClick={handleSave} loading={loading} />
     </Modal>
@@ -233,21 +215,21 @@ function ManageAccountModal({ onClose, sellerName, setSellerName }) {
 
 /* ─── Header ───────────────────────────────────────────────────── */
 export default function Header() {
-  const [sellerName, setSellerName]   = useState('');
-  const [dropOpen, setDropOpen]       = useState(false);
-  const [modal, setModal]             = useState(null); // 'password' | 'account'
-  const dropRef                       = useRef(null);
+  const [sellerName, setSellerName] = useState('');
+  const [userEmail, setUserEmail]   = useState('');
+  const [dropOpen, setDropOpen]     = useState(false);
+  const [modal, setModal]           = useState(null);
+  const dropRef                     = useRef(null);
   const location = useLocation();
   const page = pageTitles[location.pathname] || pageTitles['/dashboard'];
 
   useEffect(() => {
-    const fetchSeller = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      setSellerName(snap.exists() ? snap.data().name : user.email?.split('@')[0]);
-    };
-    fetchSeller();
+    // ✅ UPDATED: Kuha sa localStorage instead of Firebase
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (user) {
+      setSellerName(user.name || user.email?.split('@')[0]);
+      setUserEmail(user.email || '');
+    }
 
     const handleClickOutside = (e) => {
       if (dropRef.current && !dropRef.current.contains(e.target)) setDropOpen(false);
@@ -261,8 +243,6 @@ export default function Header() {
   return (
     <>
       <div style={S.header}>
-
-        {/* ── Left: Page Title ────────────────────────────────── */}
         <div style={S.titleSection}>
           <h1 style={S.pageTitle}>{page.title}</h1>
           <p style={S.pageSubtitle}>
@@ -270,7 +250,6 @@ export default function Header() {
           </p>
         </div>
 
-        {/* ── Right: Profile ──────────────────────────────────── */}
         <div style={{ position: 'relative' }} ref={dropRef}>
           <div
             style={{
@@ -289,14 +268,13 @@ export default function Header() {
             </div>
           </div>
 
-          {/* Dropdown */}
           {dropOpen && (
             <div style={S.dropdown}>
               <div style={S.dropHeader}>
                 <div style={S.dropAvatar}>{initial}</div>
                 <div>
                   <p style={S.dropName}>{sellerName || 'Seller'}</p>
-                  <p style={S.dropEmail}>{auth.currentUser?.email}</p>
+                  <p style={S.dropEmail}>{userEmail}</p>
                 </div>
               </div>
               <div style={S.dropDivider} />
@@ -317,7 +295,6 @@ export default function Header() {
         </div>
       </div>
 
-      {/* Modals */}
       {modal === 'password' && <ChangePasswordModal onClose={() => setModal(null)} />}
       {modal === 'account'  && (
         <ManageAccountModal
@@ -344,16 +321,9 @@ const S = {
     zIndex: 100,
     fontFamily: 'Nunito, sans-serif',
   },
-
   titleSection: { display: 'flex', flexDirection: 'column', gap: 2 },
-  pageTitle: {
-    fontSize: 20, fontWeight: 900, color: '#FFFFFF',
-    margin: 0, letterSpacing: '-0.5px',
-  },
-  pageSubtitle: {
-    fontSize: 12, color: 'rgba(255,255,255,0.6)', margin: 0, fontWeight: 600,
-  },
-
+  pageTitle: { fontSize: 20, fontWeight: 900, color: '#FFFFFF', margin: 0, letterSpacing: '-0.5px' },
+  pageSubtitle: { fontSize: 12, color: 'rgba(255,255,255,0.6)', margin: 0, fontWeight: 600 },
   profileChip: {
     display: 'flex', alignItems: 'center', gap: 10,
     padding: '6px 12px 6px 6px',
@@ -365,13 +335,10 @@ const S = {
     background: 'linear-gradient(135deg,#C4956A,#E8B88A)',
     display: 'flex', justifyContent: 'center', alignItems: 'center',
     color: '#3D2212', fontSize: 14, fontWeight: 900,
-    boxShadow: '0 3px 8px rgba(0,0,0,0.25)',
-    flexShrink: 0,
+    boxShadow: '0 3px 8px rgba(0,0,0,0.25)', flexShrink: 0,
   },
   profileInfo: { display: 'flex', flexDirection: 'column' },
   profileName: { fontSize: 12, fontWeight: 800, color: '#FFFFFF', margin: 0 },
-
-  /* Dropdown */
   dropdown: {
     position: 'absolute', top: 'calc(100% + 10px)', right: 0,
     background: '#fff', borderRadius: 16,
@@ -381,18 +348,15 @@ const S = {
     fontFamily: 'Nunito, sans-serif',
     overflow: 'hidden',
   },
-  dropHeader: {
-    display: 'flex', alignItems: 'center', gap: 10,
-    padding: '16px 16px 12px',
-  },
+  dropHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '16px 16px 12px' },
   dropAvatar: {
     width: 38, height: 38, borderRadius: 10, flexShrink: 0,
     background: 'linear-gradient(135deg,#5C4033,#8B6355)',
     display: 'flex', justifyContent: 'center', alignItems: 'center',
     color: '#fff', fontSize: 15, fontWeight: 900,
   },
-  dropName: { fontSize: 13, fontWeight: 800, color: '#1A1A2E', margin: 0 },
-  dropEmail: { fontSize: 10, color: '#94A3B8', margin: 0, fontWeight: 600 },
+  dropName:    { fontSize: 13, fontWeight: 800, color: '#1A1A2E', margin: 0 },
+  dropEmail:   { fontSize: 10, color: '#94A3B8', margin: 0, fontWeight: 600 },
   dropDivider: { height: 1, background: '#F1F5F9', margin: '0 10px' },
   dropItem: {
     display: 'flex', alignItems: 'center', gap: 10,

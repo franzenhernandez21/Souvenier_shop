@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { signOut } from 'firebase/auth';
-import { auth } from '../config/firebase';
 
 /* ─── Google Font ──────────────────────────────────────────────── */
 const fontLink = document.createElement('link');
@@ -42,15 +40,15 @@ export default function Sidebar() {
   const location  = useLocation();
   const [hovered, setHovered] = useState(null);
 
-  const handleLogout = async () => {
-    await signOut(auth);
+  // ✅ UPDATED: MongoDB logout
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     navigate('/login');
   };
 
   return (
     <div style={S.sidebar}>
-
-      {/* ── Logo ───────────────────────────────────────────────── */}
       <div style={S.logoContainer}>
         <div style={S.logoGradientBox}>
           <Icon name="store" size={20} color="#fff" strokeWidth={1.8} />
@@ -62,16 +60,12 @@ export default function Sidebar() {
       </div>
 
       <div style={S.divider} />
-
-      {/* ── Menu Label ─────────────────────────────────────────── */}
       <p style={S.menuLabel}>MAIN MENU</p>
 
-      {/* ── Nav Items ──────────────────────────────────────────── */}
       <nav style={S.nav}>
         {menuItems.map((item) => {
           const isActive  = location.pathname === item.path;
           const isHovered = hovered === item.path;
-
           return (
             <button
               key={item.path}
@@ -85,7 +79,6 @@ export default function Sidebar() {
               onMouseLeave={() => setHovered(null)}
             >
               {isActive && <div style={S.activeBar} />}
-
               <div style={{
                 ...S.iconBox,
                 background: isActive
@@ -102,7 +95,6 @@ export default function Sidebar() {
                   strokeWidth={isActive ? 2.2 : 1.8}
                 />
               </div>
-
               <span style={{
                 ...S.menuText,
                 color:      isActive ? '#FFFFFF' : isHovered ? '#FFE0C8' : 'rgba(255,255,255,0.6)',
@@ -110,7 +102,6 @@ export default function Sidebar() {
               }}>
                 {item.label}
               </span>
-
               {isActive && (
                 <Icon name="chevronRight" size={13} color="rgba(255,255,255,0.5)" strokeWidth={2.5} />
               )}
@@ -119,11 +110,8 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* ── Bottom Section ─────────────────────────────────────── */}
       <div style={S.bottomSection}>
         <div style={S.divider} />
-
-        {/* Logout */}
         <button
           style={{
             ...S.logoutButton,
@@ -155,7 +143,6 @@ export default function Sidebar() {
   );
 }
 
-/* ─── Styles ───────────────────────────────────────────────────── */
 const S = {
   sidebar: {
     width: '252px',
@@ -170,8 +157,6 @@ const S = {
     flexShrink: 0,
     fontFamily: 'Nunito, sans-serif',
   },
-
-  /* Logo */
   logoContainer: {
     display: 'flex', alignItems: 'center', gap: 12,
     padding: '6px 10px', marginBottom: 4,
@@ -190,20 +175,16 @@ const S = {
   logoSubtitle: {
     fontSize: 10, color: 'rgba(255,255,255,0.5)', margin: 0, fontWeight: 600, letterSpacing: 0.3,
   },
-
   divider: {
     height: 1, backgroundColor: 'rgba(255,255,255,0.1)', margin: '12px 4px',
   },
-
   menuLabel: {
     fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.35)',
     letterSpacing: 1.4, padding: '0 12px', marginBottom: 6, marginTop: 2,
   },
-
   nav: {
     display: 'flex', flexDirection: 'column', gap: 3, flex: 1,
   },
-
   menuItem: {
     display: 'flex', alignItems: 'center', gap: 10,
     padding: '9px 10px 9px 14px',
@@ -213,34 +194,23 @@ const S = {
     width: '100%', position: 'relative',
     transition: 'all 0.18s ease',
   },
-  menuItemActive: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  menuItemHover: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
-  },
+  menuItemActive: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  menuItemHover:  { backgroundColor: 'rgba(255,255,255,0.07)' },
   activeBar: {
     position: 'absolute', left: 0, top: '18%', height: '64%',
     width: 3, backgroundColor: '#C4956A', borderRadius: '0 4px 4px 0',
   },
-
   iconBox: {
     width: 32, height: 32, borderRadius: 9, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     transition: 'all 0.18s ease',
   },
-
-  menuText: {
-    flex: 1, fontSize: 13, transition: 'color 0.15s',
-  },
-
+  menuText: { flex: 1, fontSize: 13, transition: 'color 0.15s' },
   bottomSection: { marginTop: 'auto' },
-
   logoutButton: {
     display: 'flex', alignItems: 'center', gap: 10,
     padding: '9px 10px 9px 14px',
-    borderRadius: 12,
-    border: '1px solid',
+    borderRadius: 12, border: '1px solid',
     cursor: 'pointer', width: '100%',
     transition: 'all 0.18s ease',
   },

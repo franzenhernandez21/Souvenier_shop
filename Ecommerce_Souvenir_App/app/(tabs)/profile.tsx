@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,30 +13,16 @@ import {
   FlatList,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { auth, db } from "../../config/firebase";
-import {
-  doc,
-  getDoc,
-  updateDoc,
-  addDoc,
-  collection,
-  increment,
-  query,
-  where,
-  onSnapshot,
-  serverTimestamp,
-  getDocs,
-  Unsubscribe,
-} from "firebase/firestore";
-import {
-  signOut,
-  updatePassword,
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-  User,
-} from "firebase/auth";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import api from "../../config/api";
 import * as ImagePicker from "expo-image-picker";
+import { io } from "socket.io-client"; // ✅ Socket.IO
+
+// ✅ I-update ito sa actual na server URL mo
+// Dev: "http://192.168.x.x:5000" (yung IP ng PC mo sa network)
+// Prod: "https://your-deployed-server.com"
+const SOCKET_URL = "http://192.168.1.x:5000"; // ← PALITAN ITO
 
 /* ─── Types ──────────────────────────────────────────────── */
 interface OrderItem {
@@ -49,18 +35,22 @@ interface OrderItem {
 
 interface Order {
   id: string;
+  _id?: string;
   userId: string;
   status: string;
   items: OrderItem[];
   shippingFee: number;
   grandTotal?: number;
   totalPrice?: number;
-  createdAt?: { toDate: () => Date };
-  dateReceived?: { toDate: () => Date };
+  createdAt?: string;
+  dateReceived?: string;
 }
 
 const getProductId = (item: OrderItem): string =>
   item.productId || item.id || "";
+
+const getOrderId = (order: Order): string =>
+  order._id || order.id || "";
 
 /* ─── Star Rating Component ─────────────────────────────── */
 interface StarRatingProps {
@@ -85,6 +75,7 @@ export default function ProfileScreen() {
   const [userName, setUserName] = useState<string>("");
   const [userEmail, setUserEmail] = useState<string>("");
   const [userPhoto, setUserPhoto] = useState<string>("");
+  const [userId, setUserId] = useState<string>("");
   const router = useRouter();
 
   const [manageProfileModal, setManageProfileModal] = useState(false);
@@ -104,10 +95,8 @@ export default function ProfileScreen() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
-  // ✅ activeOrders = pending + processing combined
   const [activeOrders, setActiveOrders] = useState<Order[]>([]);
   const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
-  const [completedLoading, setCompletedLoading] = useState(false);
 
   /* ─── Review State ─── */
   const [reviewModal, setReviewModal] = useState(false);
@@ -117,63 +106,90 @@ export default function ProfileScreen() {
   const [reviewComment, setReviewComment] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
-  const completedUnsub = React.useRef<Unsubscribe | null>(null);
-
   const unreviewedOrderCount = completedOrders.filter((o) =>
     o.items?.some((i) => !i.reviewed && getProductId(i))
   ).length;
 
+  // ✅ useCallback para hindi mag-re-create ang function sa bawat render
+  const fetchOrders = useCallback(async () => {
+    try {
+      const userStr = await AsyncStorage.getItem("user");
+      if (!userStr) return;
+      const user = JSON.parse(userStr);
+      const id = user._id || user.id;
+
+      const res = await api.get("/orders");
+      const allOrders: Order[] = res.data
+        .filter((o: Order) => o.userId === id)
+        .map((o: Order) => ({ ...o, id: o._id || o.id }));
+
+      const active = allOrders
+        .filter((o) => ["pending", "processing"].includes(o.status))
+        .sort((a, b) => {
+          if (a.status === "processing" && b.status === "pending") return -1;
+          if (a.status === "pending" && b.status === "processing") return 1;
+          return 0;
+        });
+
+      const completed = allOrders.filter((o) => o.status === "completed");
+
+      setActiveOrders(active);
+      setCompletedOrders(completed);
+    } catch (e) {
+      console.error("fetchOrders error:", e);
+    }
+  }, []);
+
   useEffect(() => {
     fetchUser();
-    const user = auth.currentUser;
-    if (!user) return;
+    fetchOrders();
 
-    // ✅ Listen to both pending AND processing orders
-    const activeQ = query(
-      collection(db, "orders"),
-      where("userId", "==", user.uid),
-      where("status", "in", ["pending", "processing"])
-    );
-    const unsubActive = onSnapshot(activeQ, (snap) => {
-      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order));
-      // Sort: processing first, then pending
-      data.sort((a, b) => {
-        if (a.status === "processing" && b.status === "pending") return -1;
-        if (a.status === "pending" && b.status === "processing") return 1;
-        return 0;
-      });
-      setActiveOrders(data);
+    // ✅ Socket.IO — mag-connect at makinig sa order events
+    const socket = io(SOCKET_URL, {
+      transports: ["websocket"],
     });
 
-    const completedQ = query(
-      collection(db, "orders"),
-      where("userId", "==", user.uid),
-      where("status", "==", "completed")
-    );
-    const unsubCompleted = onSnapshot(completedQ, (snap) => {
-      setCompletedOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order)));
+    socket.on("connect", () => {
+      console.log("🟢 Socket connected:", socket.id);
     });
 
+    // ✅ Kapag may bagong order — i-refresh (para makita ng user ang kanyang bagong order)
+    socket.on("new_order", () => {
+      fetchOrders();
+    });
+
+    // ✅ Kapag na-update ang order (e.g. admin nag-change ng status) — i-refresh agad
+    socket.on("order_updated", () => {
+      fetchOrders();
+    });
+
+    // ✅ Kapag na-delete ang order — i-refresh
+    socket.on("order_deleted", () => {
+      fetchOrders();
+    });
+
+    socket.on("disconnect", () => {
+      console.log("🔴 Socket disconnected");
+    });
+
+    // ✅ Cleanup kapag nag-unmount ang component
     return () => {
-      unsubActive();
-      unsubCompleted();
+      socket.disconnect();
     };
-  }, []);
+  }, [fetchOrders]);
 
   const fetchUser = async () => {
     try {
-      const user = auth.currentUser;
-      if (!user) return;
+      const userStr = await AsyncStorage.getItem("user");
+      if (!userStr) return;
+      const user = JSON.parse(userStr);
+      const id = user._id || user.id;
+      setUserId(id);
+      setUserName(user.name ?? "");
       setUserEmail(user.email ?? "");
-      const docRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setUserName(data.name ?? "");
-        setUserPhoto(data.photoURL ?? "");
-      }
+      setUserPhoto(user.photoURL ?? "");
     } catch (e) {
-      console.log("fetchUser error:", (e as Error).message);
+      console.error("fetchUser error:", e);
     }
   };
 
@@ -184,7 +200,8 @@ export default function ProfileScreen() {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
-          await signOut(auth);
+          await AsyncStorage.removeItem("token");
+          await AsyncStorage.removeItem("user");
           router.replace("/login");
         },
       },
@@ -219,12 +236,24 @@ export default function ProfileScreen() {
     }
     setProfileLoading(true);
     try {
-      const user = auth.currentUser as User;
-      await updateDoc(doc(db, "users", user.uid), {
+      await api.put(`/users/${userId}`, {
         name: editName.trim(),
         email: editEmail.trim(),
         photoURL: userPhoto,
       });
+      const userStr = await AsyncStorage.getItem("user");
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        await AsyncStorage.setItem(
+          "user",
+          JSON.stringify({
+            ...user,
+            name: editName.trim(),
+            email: editEmail.trim(),
+            photoURL: userPhoto,
+          })
+        );
+      }
       setUserName(editName.trim());
       setUserEmail(editEmail.trim());
       setManageProfileModal(false);
@@ -250,22 +279,21 @@ export default function ProfileScreen() {
     }
     setPasswordLoading(true);
     try {
-      const user = auth.currentUser as User;
-      const credential = EmailAuthProvider.credential(user.email as string, currentPassword);
-      await reauthenticateWithCredential(user, credential);
-      await updatePassword(user, newPassword);
+      await api.put(`/users/${userId}/change-password`, {
+        currentPassword,
+        newPassword,
+      });
       setPasswordModal(false);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       Alert.alert("Success", "Password changed successfully!");
-    } catch (e) {
-      Alert.alert("Error", (e as Error).message);
+    } catch (e: any) {
+      Alert.alert("Error", e.response?.data?.message || e.message);
     }
     setPasswordLoading(false);
   };
 
-  /* ─── Confirm received (only for processing orders) ─────── */
   const handleConfirmReceived = async (order: Order) => {
     Alert.alert("Confirm Receipt", "Have you received your order?", [
       { text: "Cancel", style: "cancel" },
@@ -273,19 +301,12 @@ export default function ProfileScreen() {
         text: "Yes, Received",
         onPress: async () => {
           try {
-            await updateDoc(doc(db, "orders", order.id), {
+            const orderId = getOrderId(order);
+            await api.put(`/orders/${orderId}`, {
               status: "completed",
-              dateReceived: serverTimestamp(),
+              dateReceived: new Date().toISOString(),
             });
-            await Promise.all(
-              (order.items ?? []).map((item) => {
-                const pid = getProductId(item);
-                if (!pid) return Promise.resolve();
-                return updateDoc(doc(db, "products", pid), {
-                  sold: increment(item.quantity),
-                });
-              })
-            );
+            await fetchOrders();
             Alert.alert(
               "Thank you!",
               "Order marked as received. You can now leave a review in Order History!"
@@ -319,34 +340,29 @@ export default function ProfileScreen() {
     }
     setReviewSubmitting(true);
     try {
-      const user = auth.currentUser as User;
-      await addDoc(collection(db, "reviews"), {
+      const orderId = getOrderId(reviewOrder);
+
+      await api.post("/reviews", {
         productId,
-        userId: user.uid,
-        userName: userName || user.email,
-        userPhoto: userPhoto || "",
-        orderId: reviewOrder.id,
+        userId,
+        userName,
+        userPhoto,
+        orderId,
         rating: reviewRating,
         comment: reviewComment.trim(),
-        createdAt: serverTimestamp(),
       });
-      const reviewsSnap = await getDocs(
-        query(collection(db, "reviews"), where("productId", "==", productId))
-      );
-      const allRatings = reviewsSnap.docs.map((d) => d.data().rating as number);
-      const avgRating = allRatings.reduce((a, b) => a + b, 0) / allRatings.length;
-      await updateDoc(doc(db, "products", productId), {
-        rating: parseFloat(avgRating.toFixed(1)),
-      });
+
       const updatedItems: OrderItem[] = reviewOrder.items.map((i) =>
         getProductId(i) === productId ? { ...i, reviewed: true } : i
       );
-      await updateDoc(doc(db, "orders", reviewOrder.id), { items: updatedItems });
+      await api.put(`/orders/${orderId}`, { items: updatedItems });
+
       setCompletedOrders((prev) =>
         prev.map((o) =>
-          o.id === reviewOrder.id ? { ...o, items: updatedItems } : o
+          getOrderId(o) === orderId ? { ...o, items: updatedItems } : o
         )
       );
+
       setReviewModal(false);
       Alert.alert("Thank you!", "Your review has been submitted.");
     } catch (e) {
@@ -382,6 +398,11 @@ export default function ProfileScreen() {
   );
 
   const getTotal = (order: Order) => order.grandTotal ?? order.totalPrice ?? 0;
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString("en-PH");
+  };
 
   return (
     <ScrollView
@@ -420,10 +441,7 @@ export default function ProfileScreen() {
         {/* Orders */}
         <Text style={styles.sectionLabel}>Orders</Text>
         <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => setTrackOrdersModal(true)}
-          >
+          <TouchableOpacity style={styles.menuItem} onPress={() => setTrackOrdersModal(true)}>
             <View style={styles.menuLeft}>
               <View>
                 <Ionicons name="time-outline" size={20} color="#333" />
@@ -442,10 +460,7 @@ export default function ProfileScreen() {
 
           <View style={styles.separator} />
 
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => setOrderHistoryModal(true)}
-          >
+          <TouchableOpacity style={styles.menuItem} onPress={() => setOrderHistoryModal(true)}>
             <View style={styles.menuLeft}>
               <View>
                 <Ionicons name="receipt-outline" size={20} color="#333" />
@@ -518,7 +533,11 @@ export default function ProfileScreen() {
               onPress={handleSaveProfile}
               disabled={profileLoading}
             >
-              {profileLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
+              {profileLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -530,29 +549,69 @@ export default function ProfileScreen() {
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Change Password</Text>
-              <TouchableOpacity onPress={() => { setPasswordModal(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setPasswordModal(false);
+                  setCurrentPassword("");
+                  setNewPassword("");
+                  setConfirmPassword("");
+                }}
+              >
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
             <Text style={styles.inputLabel}>Current Password</Text>
             <View style={styles.passwordRow}>
-              <TextInput style={styles.passwordInput} value={currentPassword} onChangeText={setCurrentPassword} placeholder="Enter current password" placeholderTextColor="#ccc" secureTextEntry={!showCurrent} />
+              <TextInput
+                style={styles.passwordInput}
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                placeholder="Enter current password"
+                placeholderTextColor="#ccc"
+                secureTextEntry={!showCurrent}
+              />
               <TouchableOpacity onPress={() => setShowCurrent(!showCurrent)}>
-                <Ionicons name={showCurrent ? "eye-off-outline" : "eye-outline"} size={20} color="#999" />
+                <Ionicons
+                  name={showCurrent ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color="#999"
+                />
               </TouchableOpacity>
             </View>
             <Text style={styles.inputLabel}>New Password</Text>
             <View style={styles.passwordRow}>
-              <TextInput style={styles.passwordInput} value={newPassword} onChangeText={setNewPassword} placeholder="Enter new password" placeholderTextColor="#ccc" secureTextEntry={!showNew} />
+              <TextInput
+                style={styles.passwordInput}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="Enter new password"
+                placeholderTextColor="#ccc"
+                secureTextEntry={!showNew}
+              />
               <TouchableOpacity onPress={() => setShowNew(!showNew)}>
-                <Ionicons name={showNew ? "eye-off-outline" : "eye-outline"} size={20} color="#999" />
+                <Ionicons
+                  name={showNew ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color="#999"
+                />
               </TouchableOpacity>
             </View>
             <Text style={styles.inputLabel}>Confirm New Password</Text>
             <View style={styles.passwordRow}>
-              <TextInput style={styles.passwordInput} value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Confirm new password" placeholderTextColor="#ccc" secureTextEntry={!showConfirm} />
+              <TextInput
+                style={styles.passwordInput}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="Confirm new password"
+                placeholderTextColor="#ccc"
+                secureTextEntry={!showConfirm}
+              />
               <TouchableOpacity onPress={() => setShowConfirm(!showConfirm)}>
-                <Ionicons name={showConfirm ? "eye-off-outline" : "eye-outline"} size={20} color="#999" />
+                <Ionicons
+                  name={showConfirm ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color="#999"
+                />
               </TouchableOpacity>
             </View>
             <TouchableOpacity
@@ -560,7 +619,11 @@ export default function ProfileScreen() {
               onPress={handleChangePassword}
               disabled={passwordLoading}
             >
-              {passwordLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Change Password</Text>}
+              {passwordLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Change Password</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -585,7 +648,7 @@ export default function ProfileScreen() {
             ) : (
               <FlatList
                 data={activeOrders}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item) => getOrderId(item)}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 20 }}
                 renderItem={({ item }) => {
@@ -593,7 +656,6 @@ export default function ProfileScreen() {
                   return (
                     <View style={styles.orderCard}>
                       <View style={styles.orderCardHeader}>
-                        {/* ✅ Dynamic status badge */}
                         {isProcessing ? (
                           <View style={styles.shippingBadge}>
                             <View style={styles.shippingDot} />
@@ -612,7 +674,9 @@ export default function ProfileScreen() {
 
                       {item.items?.map((product, index) => (
                         <View key={index} style={styles.orderItemRow}>
-                          <Text style={styles.orderItemName} numberOfLines={1}>{product.name}</Text>
+                          <Text style={styles.orderItemName} numberOfLines={1}>
+                            {product.name}
+                          </Text>
                           <Text style={styles.orderItemQty}>x{product.quantity}</Text>
                         </View>
                       ))}
@@ -627,7 +691,6 @@ export default function ProfileScreen() {
                         <Text style={styles.orderGrandValue}>₱{getTotal(item)}</Text>
                       </View>
 
-                      {/* ✅ Confirm Received only shows when processing */}
                       {isProcessing && (
                         <TouchableOpacity
                           style={styles.receivedButton}
@@ -652,7 +715,7 @@ export default function ProfileScreen() {
           <View style={[styles.modalSheet, styles.modalSheetTall]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Order History</Text>
-              <TouchableOpacity onPress={() => { setOrderHistoryModal(false); completedUnsub.current?.(); completedUnsub.current = null; }}>
+              <TouchableOpacity onPress={() => setOrderHistoryModal(false)}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
@@ -661,7 +724,8 @@ export default function ProfileScreen() {
               <View style={styles.reviewBanner}>
                 <Ionicons name="star" size={15} color="#D97706" />
                 <Text style={styles.reviewBannerText}>
-                  {unreviewedOrderCount} order{unreviewedOrderCount > 1 ? "s" : ""} waiting for your review!
+                  {unreviewedOrderCount} order{unreviewedOrderCount > 1 ? "s" : ""} waiting for
+                  your review!
                 </Text>
               </View>
             )}
@@ -674,7 +738,7 @@ export default function ProfileScreen() {
             ) : (
               <FlatList
                 data={completedOrders}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item) => getOrderId(item)}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 20 }}
                 renderItem={({ item }) => {
@@ -689,11 +753,11 @@ export default function ProfileScreen() {
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
                           <Text style={styles.orderDate}>
-                            Ordered: {item.createdAt?.toDate?.().toLocaleDateString("en-PH")}
+                            Ordered: {formatDate(item.createdAt)}
                           </Text>
-                          {item.dateReceived?.toDate && (
+                          {item.dateReceived && (
                             <Text style={styles.orderDate}>
-                              Received: {item.dateReceived.toDate().toLocaleDateString("en-PH")}
+                              Received: {formatDate(item.dateReceived)}
                             </Text>
                           )}
                         </View>
@@ -782,11 +846,18 @@ export default function ProfileScreen() {
             />
             <Text style={styles.charCount}>{reviewComment.length}/300</Text>
             <TouchableOpacity
-              style={[styles.saveButton, (reviewSubmitting || reviewRating === 0) && styles.buttonDisabled]}
+              style={[
+                styles.saveButton,
+                (reviewSubmitting || reviewRating === 0) && styles.buttonDisabled,
+              ]}
               onPress={handleSubmitReview}
               disabled={reviewSubmitting || reviewRating === 0}
             >
-              {reviewSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Submit Review</Text>}
+              {reviewSubmitting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Submit Review</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -837,11 +908,9 @@ const styles = StyleSheet.create({
   orderCard: { backgroundColor: "#FDF6F0", borderRadius: 16, padding: 16, marginBottom: 14 },
   orderCardHighlight: { borderWidth: 1.5, borderColor: "#FDE68A" },
   orderCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
-  // Pending — gray/blue: waiting for seller confirmation
   processingBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#F1F5F9", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
   processingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#94A3B8" },
   processingBadgeText: { fontSize: 12, fontWeight: "600", color: "#64748B" },
-  // Processing — orange: being shipped
   shippingBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FFF7ED", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
   shippingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#F97316" },
   shippingBadgeText: { fontSize: 12, fontWeight: "600", color: "#C2410C" },

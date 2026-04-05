@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../config/firebase';
+import api from '../config/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -22,7 +21,9 @@ export default function Login() {
     setLoading(true);
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const res = await api.post('/auth/login', { email, password });
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
       navigate('/dashboard');
     } catch (err) {
       setError('Invalid email or password. Please try again.');
@@ -50,9 +51,34 @@ export default function Login() {
 
             <div style={styles.featureList}>
               {[
-                { icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, text: 'Real-time Updates' },
-                { icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>, text: 'Order Tracking' },
-                { icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>, text: 'Instant Alerts' },
+                {
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                  ),
+                  text: 'Real-time Updates',
+                },
+                {
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="1" y="3" width="15" height="13" rx="2"/>
+                      <path d="M16 8h4l3 3v5h-7V8z"/>
+                      <circle cx="5.5" cy="18.5" r="2.5"/>
+                      <circle cx="18.5" cy="18.5" r="2.5"/>
+                    </svg>
+                  ),
+                  text: 'Order Tracking',
+                },
+                {
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                  ),
+                  text: 'Instant Alerts',
+                },
               ].map((f, i) => (
                 <div key={i} style={styles.featureItem}>
                   <span style={styles.featureIcon}>{f.icon}</span>
@@ -73,7 +99,9 @@ export default function Login() {
             {error && (
               <div style={styles.errorBox}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
                 <span style={styles.errorText}>{error}</span>
               </div>
@@ -84,8 +112,10 @@ export default function Login() {
               <div style={styles.fieldGroup}>
                 <label style={styles.label}>Email Address</label>
                 <div style={{ ...styles.inputBox, ...(emailFocused ? styles.inputFocused : {}) }}>
-                  <svg style={styles.fieldIcon} width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={emailFocused ? '#7D5A4F' : '#9CA3AF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+                  <svg style={styles.fieldIcon} width="17" height="17" viewBox="0 0 24 24" fill="none"
+                    stroke={emailFocused ? '#7D5A4F' : '#9CA3AF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                    <polyline points="22,6 12,13 2,6"/>
                   </svg>
                   <input
                     style={styles.input}
@@ -102,8 +132,10 @@ export default function Login() {
               <div style={styles.fieldGroup}>
                 <label style={styles.label}>Password</label>
                 <div style={{ ...styles.inputBox, ...(passwordFocused ? styles.inputFocused : {}) }}>
-                  <svg style={styles.fieldIcon} width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={passwordFocused ? '#7D5A4F' : '#9CA3AF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                  <svg style={styles.fieldIcon} width="17" height="17" viewBox="0 0 24 24" fill="none"
+                    stroke={passwordFocused ? '#7D5A4F' : '#9CA3AF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
                   <input
                     style={styles.input}
@@ -114,14 +146,22 @@ export default function Login() {
                     onFocus={() => setPasswordFocused(true)}
                     onBlur={() => setPasswordFocused(false)}
                   />
-                  <button type="button" style={styles.eyeBtn} onClick={() => setShowPassword(!showPassword)} tabIndex={-1}>
+                  <button
+                    type="button"
+                    style={styles.eyeBtn}
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                  >
                     {showPassword ? (
                       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
                       </svg>
                     ) : (
                       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
                       </svg>
                     )}
                   </button>
@@ -154,7 +194,7 @@ const styles = {
     width: '100%',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',       // centered sa screen
+    justifyContent: 'center',
     fontFamily: "'Segoe UI', 'Inter', sans-serif",
     backgroundImage: 'url(/assets/login.jpg)',
     backgroundSize: 'cover',
@@ -163,14 +203,12 @@ const styles = {
     backgroundColor: '#F3EDE8',
     overflow: 'hidden',
   },
-
   overlay: {
     position: 'absolute',
     inset: 0,
     background: 'rgba(0,0,0,0.32)',
     zIndex: 1,
   },
-
   cardWrapper: {
     position: 'relative',
     zIndex: 10,
@@ -180,8 +218,6 @@ const styles = {
     justifyContent: 'center',
     padding: '40px 24px',
   },
-
-  /* Landscape card — wide & short, two columns */
   card: {
     width: '100%',
     maxWidth: 860,
@@ -194,8 +230,6 @@ const styles = {
     alignItems: 'center',
     gap: 0,
   },
-
-  /* LEFT column */
   leftSide: {
     flex: '0 0 300px',
     display: 'flex',
@@ -205,14 +239,12 @@ const styles = {
     paddingRight: 40,
     textAlign: 'center',
   },
-
   logo: {
     width: 150,
     height: 150,
     objectFit: 'contain',
     marginBottom: 14,
   },
-
   shopName: {
     fontSize: 26,
     fontWeight: 900,
@@ -220,7 +252,6 @@ const styles = {
     margin: '0 0 4px 0',
     letterSpacing: '-0.5px',
   },
-
   shopTagline: {
     fontSize: 12,
     color: '#9CA3AF',
@@ -229,7 +260,6 @@ const styles = {
     textTransform: 'uppercase',
     margin: '0 0 28px 0',
   },
-
   featureList: {
     display: 'flex',
     flexDirection: 'column',
@@ -237,7 +267,6 @@ const styles = {
     alignItems: 'flex-start',
     width: '100%',
   },
-
   featureItem: {
     display: 'flex',
     alignItems: 'center',
@@ -248,21 +277,17 @@ const styles = {
     padding: '9px 14px',
     width: '100%',
   },
-
   featureIcon: {
     color: '#7D5A4F',
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
   },
-
   featureText: {
     fontSize: 13,
     fontWeight: 600,
     color: '#4B3228',
   },
-
-  /* Vertical divider */
   verticalDivider: {
     width: 1,
     alignSelf: 'stretch',
@@ -270,15 +295,12 @@ const styles = {
     margin: '0 0',
     flexShrink: 0,
   },
-
-  /* RIGHT column */
   rightSide: {
     flex: 1,
     paddingLeft: 48,
     display: 'flex',
     flexDirection: 'column',
   },
-
   title: {
     fontSize: 26,
     fontWeight: 800,
@@ -286,14 +308,12 @@ const styles = {
     margin: '0 0 6px 0',
     letterSpacing: '-0.4px',
   },
-
   subtitle: {
     fontSize: 13.5,
     color: '#9CA3AF',
     margin: '0 0 24px 0',
     lineHeight: 1.5,
   },
-
   errorBox: {
     display: 'flex',
     alignItems: 'center',
@@ -304,24 +324,20 @@ const styles = {
     padding: '10px 13px',
     marginBottom: 16,
   },
-
   errorText: {
     fontSize: 13,
     color: '#DC2626',
   },
-
   form: {
     display: 'flex',
     flexDirection: 'column',
     gap: 16,
   },
-
   fieldGroup: {
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
   },
-
   label: {
     fontSize: 11,
     fontWeight: 700,
@@ -329,7 +345,6 @@ const styles = {
     letterSpacing: '0.7px',
     textTransform: 'uppercase',
   },
-
   inputBox: {
     display: 'flex',
     alignItems: 'center',
@@ -340,18 +355,15 @@ const styles = {
     overflow: 'hidden',
     height: 50,
   },
-
   inputFocused: {
     borderColor: '#7D5A4F',
     backgroundColor: '#fff',
     boxShadow: '0 0 0 4px rgba(125,90,79,0.1)',
   },
-
   fieldIcon: {
     marginLeft: 13,
     flexShrink: 0,
   },
-
   input: {
     flex: 1,
     padding: '0 13px',
@@ -363,7 +375,6 @@ const styles = {
     fontFamily: 'inherit',
     height: '100%',
   },
-
   eyeBtn: {
     padding: '0 13px',
     border: 'none',
@@ -373,7 +384,6 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
   },
-
   submitBtn: {
     background: 'linear-gradient(135deg, #3D2314 0%, #7D5A4F 100%)',
     color: '#fff',
@@ -390,7 +400,6 @@ const styles = {
     transition: 'opacity 0.2s',
     width: '100%',
   },
-
   footerNote: {
     textAlign: 'center',
     fontSize: 12,
