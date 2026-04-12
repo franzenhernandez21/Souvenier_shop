@@ -19,6 +19,12 @@ import api from "../../config/api";
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
 
+// ✅ FIX: Helper to ensure HTTPS image URLs
+const safeImageUrl = (url?: string): string => {
+  if (!url) return '';
+  return url.startsWith('http://') ? url.replace('http://', 'https://') : url;
+};
+
 interface Product {
   id: string;
   _id?: string;
@@ -76,7 +82,7 @@ function ProductCard({
         <View style={styles.imageContainer}>
           {product.image && !imgError ? (
             <Image
-              source={{ uri: product.image }}
+              source={{ uri: safeImageUrl(product.image) }}
               style={styles.productImage}
               resizeMode="cover"
               onError={() => setImgError(true)}
@@ -145,30 +151,14 @@ export default function ShopScreen() {
       try {
         const res = await api.get('/products');
 
-        // ✅ TEMP DEBUG — screenshot mo ang pop-up na lalabas!
-        // Tanggalin mo ito pagkatapos malaman ang URL
-        if (res.data.length > 0) {
-          const first = res.data[0];
-          Alert.alert(
-            '🖼️ Image Debug',
-            `Name: ${first.name}\n\nImage URL:\n"${first.image || 'WALANG IMAGE'}"\n\nTotal products: ${res.data.length}`
-          );
-        } else {
-          Alert.alert('Debug', 'Walang products sa DB!');
-        }
 
         const data: Product[] = res.data.map((p: any) => {
-          const rawImage = p.image || '';
-          const safeImage = rawImage.startsWith('http://')
-            ? rawImage.replace('http://', 'https://')
-            : rawImage;
-
           return {
             ...p,
             id: p._id || p.id,
             rating: String(p.rating ?? 0),
             sold: p.sold ?? 0,
-            image: safeImage,
+            image: safeImageUrl(p.image), // ✅ FIX: Use helper
           };
         });
 

@@ -18,6 +18,12 @@ import api from "../../config/api";
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
 
+// ✅ FIX: Helper to ensure HTTPS image URLs
+const safeImageUrl = (url?: string): string => {
+  if (!url) return '';
+  return url.startsWith('http://') ? url.replace('http://', 'https://') : url;
+};
+
 interface Product {
   id: string;
   _id?: string;
@@ -48,6 +54,7 @@ function ProductCard({
   onPress: () => void;
 }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [imgError, setImgError] = useState(false);
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
@@ -82,11 +89,18 @@ function ProductCard({
         style={styles.card}
       >
         <View style={styles.imageContainer}>
-          <Image
-            source={{ uri: product.image }}
-            style={styles.productImage}
-            resizeMode="cover"
-          />
+          {product.image && !imgError ? (
+            <Image
+              source={{ uri: safeImageUrl(product.image) }}
+              style={styles.productImage}
+              resizeMode="cover"
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Text style={{ fontSize: 36 }}>🛍️</Text>
+            </View>
+          )}
           {isOutOfStock && (
             <View style={styles.outOfStockBadge}>
               <Text style={styles.outOfStockText}>Out of Stock</Text>
@@ -159,6 +173,9 @@ export default function HomeScreen() {
         const data: Product[] = res.data.map((p: any) => ({
           ...p,
           id: p._id || p.id,
+          image: safeImageUrl(p.image), // ✅ FIX: Sanitize image URL
+          rating: String(p.rating ?? 0),
+          sold: p.sold ?? 0,
         }));
         setProducts(data);
       } catch (err) {
@@ -363,6 +380,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: "rgba(240,230,224,0.8)", flex: 1 },
   imageContainer: { width: "100%", height: 150, position: "relative", backgroundColor: "#F5EDE8" },
   productImage: { width: "100%", height: "100%" },
+  imagePlaceholder: { width: "100%", height: "100%", justifyContent: "center", alignItems: "center", backgroundColor: "#F5EDE8" },
   outOfStockBadge: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", alignItems: "center" },
   outOfStockText: { color: "#fff", fontWeight: "700", fontSize: 13, letterSpacing: 0.5 },
   lowStockBadge: { position: "absolute", top: 8, right: 8, backgroundColor: "#FF6B35", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },

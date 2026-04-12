@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import api from '../config/api';
+import { io } from 'socket.io-client';
 
 /* ─── Google Font ──────────────────────────────────────────────── */
 const fontLink = document.createElement('link');
@@ -81,9 +82,47 @@ export default function Orders() {
 
   useEffect(() => {
     fetchOrders();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchOrders, 30000);
-    return () => clearInterval(interval);
+
+    // ✅ FIX: Socket.IO realtime connection
+    const socket = io('http://localhost:5000', {
+      transports: ['websocket'],
+    });
+
+    // ✅ New order from mobile user
+    socket.on('new_order', (order) => {
+      setOrders((prev) => [order, ...prev]);
+    });
+
+    // ✅ Order updated (status change)
+    socket.on('order_updated', (updatedOrder) => {
+      setOrders((prev) =>
+        prev.map((o) =>
+          (o._id || o.id) === (updatedOrder._id || updatedOrder.id)
+            ? updatedOrder
+            : o
+        )
+      );
+      // Update selected order if open
+      setSelectedOrder((prev) =>
+        prev && (prev._id || prev.id) === (updatedOrder._id || updatedOrder.id)
+          ? updatedOrder
+          : prev
+      );
+    });
+
+    // ✅ Order deleted
+    socket.on('order_deleted', ({ id }) => {
+      setOrders((prev) =>
+        prev.filter((o) => (o._id || o.id) !== id)
+      );
+      setSelectedOrder((prev) =>
+        prev && (prev._id || prev.id) === id ? null : prev
+      );
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   // ✅ UPDATED: Confirm order via API

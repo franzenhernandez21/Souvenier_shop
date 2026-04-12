@@ -22,7 +22,7 @@ import { io } from "socket.io-client"; // ✅ Socket.IO
 // ✅ I-update ito sa actual na server URL mo
 // Dev: "http://192.168.x.x:5000" (yung IP ng PC mo sa network)
 // Prod: "https://your-deployed-server.com"
-const SOCKET_URL = "http://192.168.1.x:5000"; // ← PALITAN ITO
+const SOCKET_URL = "http://192.168.1.30:5000"; // ✅ Same IP as api.js
 
 /* ─── Types ──────────────────────────────────────────────── */
 interface OrderItem {

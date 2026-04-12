@@ -220,55 +220,46 @@ export default function Products() {
     setShowModal(true);
   };
 
-  /* ✅ Helper: Convert any image to JPG para siguradong gagana sa React Native */
-  const convertToJpg = (file) => {
-    return new Promise((resolve) => {
+  /* ✅ Convert image to Base64 — direkta sa MongoDB, walang third-party! */
+  const convertToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       const img = new window.Image();
       img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-        canvas.toBlob((blob) => {
-          resolve(new File([blob], 'image.jpg', { type: 'image/jpeg' }));
-        }, 'image/jpeg', 0.92);
+        // ✅ Resize para hindi masyadong malaki sa DB (max 800px wide)
+        const MAX_WIDTH = 800;
+        let width = img.width;
+        let height = img.height;
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+        // ✅ Convert to Base64 JPEG (0.8 quality para mas maliit)
+        const base64 = canvas.toDataURL('image/jpeg', 0.8);
+        resolve(base64);
       };
+      img.onerror = reject;
       img.src = URL.createObjectURL(file);
     });
   };
 
-  /* ✅ FIXED: Gumagamit ng data.data.url — pinaka-reliable na field sa ImgBB */
+  /* ✅ No more ImgBB! I-convert lang sa Base64 then i-save sa MongoDB */
   const uploadImage = async (file) => {
-    const API_KEY = '041fc834bd83e283520a7c5e4dc9fe3e';
-    // ✅ CONVERT to JPG para siguradong gagana sa React Native
-    const convertedFile = await convertToJpg(file);
-    const formData = new FormData();
-    formData.append('image', convertedFile);
     setUploading(true);
     setUploadProgress(30);
     try {
-      const response = await fetch(`https://api.imgbb.com/1/upload?key=${API_KEY}`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await response.json();
+      const base64 = await convertToBase64(file);
       setUploadProgress(100);
       setUploading(false);
-
-      console.log('ImgBB response:', data); // ← para makita mo ang buong response
-
-      if (data.success) {
-        // ✅ FIXED: data.data.url ang tamang field, hindi display_url
-        const imageUrl = data.data.url;
-        console.log('Image URL saved:', imageUrl);
-        return imageUrl;
-      } else {
-        throw new Error('ImgBB upload failed: ' + JSON.stringify(data));
-      }
+      return base64; // ← ito na ang "image URL" — base64 string
     } catch (error) {
       setUploading(false);
-      console.error('Upload error:', error);
+      setUploadProgress(0);
+      console.error('Image convert error:', error);
       throw error;
     }
   };
@@ -283,9 +274,18 @@ export default function Products() {
       return;
     }
     setSaving(true);
+    setUploadProgress(0); // ✅ FIX: Reset progress bago mag-upload
     try {
       let imageUrl = editingProduct?.image || '';
       if (imageFile) imageUrl = await uploadImage(imageFile);
+
+      // ✅ FIX: I-validate na may laman ang imageUrl bago i-save
+      if (!imageUrl) {
+        alert('Image upload failed. Please try again.');
+        setSaving(false);
+        setUploadProgress(0);
+        return;
+      }
 
       const productData = {
         name: form.name,
@@ -296,8 +296,6 @@ export default function Products() {
         image: imageUrl,
       };
 
-      console.log('Saving product with data:', productData); // ← debug
-
       if (editingProduct) {
         await api.put(`/products/${getId(editingProduct)}`, productData);
       } else {
@@ -306,6 +304,10 @@ export default function Products() {
 
       await fetchProducts();
       setShowModal(false);
+      // ✅ FIX: Reset image states after successful save
+      setImageFile(null);
+      setImagePreview('');
+      setUploadProgress(0);
     } catch (err) {
       alert('Error saving product: ' + err.message);
       console.error('Save error:', err);
