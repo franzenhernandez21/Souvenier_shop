@@ -2,12 +2,13 @@ import React, { createContext, useContext, useState } from "react";
 
 type Product = {
   id: string;
-  _id?: string;       // ✅ add para sa MongoDB
+  _id?: string;       // ✅ MongoDB ID
+  productId?: string; // ✅ explicit productId para sa reviews
   name: string;
   price: string | number;
   image: string;
   category: string;
-  stock?: number;     // ✅ add para sa stock check
+  stock?: number;
   sold?: number;
 };
 

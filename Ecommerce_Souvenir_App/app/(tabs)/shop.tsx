@@ -15,6 +15,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import api from "../../config/api";
+import { io } from "socket.io-client";
+
+const SOCKET_URL = "http://192.168.1.30:5000"; // ✅ same IP as api.js
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
@@ -146,31 +149,39 @@ export default function ShopScreen() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  const fetchProducts = async () => {
+    try {
+      const res = await api.get('/products');
+      const data: Product[] = res.data.map((p: any) => ({
+        ...p,
+        id: p._id || p.id,
+        rating: String(p.rating ?? 0),
+        sold: p.sold ?? 0,
+        image: safeImageUrl(p.image),
+      }));
+      setProducts(data);
+    } catch (err) {
+      console.error("Products fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const res = await api.get('/products');
-
-
-        const data: Product[] = res.data.map((p: any) => {
-          return {
-            ...p,
-            id: p._id || p.id,
-            rating: String(p.rating ?? 0),
-            sold: p.sold ?? 0,
-            image: safeImageUrl(p.image), // ✅ FIX: Use helper
-          };
-        });
-
-        setProducts(data);
-      } catch (err) {
-        Alert.alert('Fetch Error', String(err));
-        console.error("Products fetch error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchProducts();
+
+    // ✅ Socket — mag-refresh ng products pag may bagong review o completed order
+    const socket = io(SOCKET_URL, { transports: ["websocket"] });
+
+    socket.on("review_submitted", () => {
+      fetchProducts();
+    });
+
+    socket.on("order_updated", () => {
+      fetchProducts();
+    });
+
+    return () => { socket.disconnect(); };
   }, []);
 
   const filteredProducts = products.filter((p) => {

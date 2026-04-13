@@ -17,6 +17,7 @@ import { useRouter } from "expo-router";
 
 type Product = {
   id: string;
+  _id?: string;       // ✅ MongoDB ID — kailangan para sa review
   name: string;
   price: string | number;
   image: string;
@@ -88,8 +89,13 @@ const unitPrice = typeof product.price === 'number'
 
   if (mode === "cart") {
     // ── Add to Cart: just add to cart, DON'T touch stock yet ──
+    // ✅ FIX: Ensure productId = MongoDB _id para sa reviews later
+    const cartProduct = {
+      ...product,
+      productId: product._id || product.id, // ← ito ang gagamitin pag nag-review
+    };
     for (let i = 0; i < quantity; i++) {
-      addToCart(product);
+      addToCart(cartProduct);
     }
     onClose();
     Alert.alert(
@@ -98,8 +104,12 @@ const unitPrice = typeof product.price === 'number'
     );
   } else {
     // ── Buy Now: add to cart then go to checkout ──
+    const cartProduct = {
+      ...product,
+      productId: product._id || product.id, // ✅ FIX: para sa reviews
+    };
     for (let i = 0; i < quantity; i++) {
-      addToCart(product);
+      addToCart(cartProduct);
     }
     onClose();
     router.push("/checkout");

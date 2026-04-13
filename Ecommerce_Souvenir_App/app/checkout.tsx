@@ -59,6 +59,9 @@ export default function CheckoutScreen() {
           typeof item.quantity === "number"
             ? item.quantity
             : parseInt(String(item.quantity), 10) || 1,
+        // ✅ FIX: Siguraduhing naka-save ang productId sa order items
+        // Para magamit sa reviews pagkatapos ma-receive ang order
+        productId: item.productId || item._id || item.id,
       }));
 
       // Place order

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
+const Product = require('../models/Product');
 
 // Get all orders
 router.get('/', async (req, res) => {
@@ -30,7 +31,25 @@ router.post('/', async (req, res) => {
 // Update order status
 router.put('/:id', async (req, res) => {
   try {
+    const prevOrder = await Order.findById(req.params.id);
     const order = await Order.findByIdAndUpdate(req.params.id, req.body, { new: true });
+
+    // ✅ Pag naging 'completed' ang order, i-increment ang sold ng bawat product
+    if (
+      req.body.status === 'completed' &&
+      prevOrder?.status !== 'completed' &&
+      order.items?.length
+    ) {
+      await Promise.all(
+        order.items.map((item) => {
+          const productId = item._id || item.productId || item.id;
+          if (!productId) return Promise.resolve();
+          return Product.findByIdAndUpdate(productId, {
+            $inc: { sold: item.quantity || 1 },
+          });
+        })
+      );
+    }
 
     // ✅ Notify lahat ng connected clients na na-update ang order
     const io = req.app.get('io');

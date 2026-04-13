@@ -22,7 +22,7 @@ import { io } from "socket.io-client"; // ✅ Socket.IO
 // ✅ I-update ito sa actual na server URL mo
 // Dev: "http://192.168.x.x:5000" (yung IP ng PC mo sa network)
 // Prod: "https://your-deployed-server.com"
-const SOCKET_URL = "http://192.168.1.30:5000"; // ✅ Same IP as api.js
+const SOCKET_URL = "http://192.168.1.x:5000"; // ← PALITAN ITO
 
 /* ─── Types ──────────────────────────────────────────────── */
 interface OrderItem {
@@ -106,6 +106,10 @@ export default function ProfileScreen() {
   const [reviewComment, setReviewComment] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
+  /* ─── Notification State ─── */
+  const [reviewNotif, setReviewNotif] = useState(false); // in-app banner
+  const [reviewNotifOrders, setReviewNotifOrders] = useState<Order[]>([]); // orders na pwede na i-review
+
   const unreviewedOrderCount = completedOrders.filter((o) =>
     o.items?.some((i) => !i.reviewed && getProductId(i))
   ).length;
@@ -159,8 +163,26 @@ export default function ProfileScreen() {
     });
 
     // ✅ Kapag na-update ang order (e.g. admin nag-change ng status) — i-refresh agad
-    socket.on("order_updated", () => {
-      fetchOrders();
+    socket.on("order_updated", async (updatedOrder: any) => {
+      await fetchOrders();
+
+      // ✅ NOTIFICATION: Pag naging "completed" ang order ng current user — show banner
+      const userStr = await AsyncStorage.getItem("user");
+      if (!userStr) return;
+      const user = JSON.parse(userStr);
+      const currentUserId = user._id || user.id;
+
+      if (
+        updatedOrder?.status === "completed" &&
+        updatedOrder?.userId === currentUserId
+      ) {
+        setReviewNotifOrders((prev) => {
+          const already = prev.find((o) => (o._id || o.id) === (updatedOrder._id || updatedOrder.id));
+          if (already) return prev;
+          return [...prev, { ...updatedOrder, id: updatedOrder._id || updatedOrder.id }];
+        });
+        setReviewNotif(true);
+      }
     });
 
     // ✅ Kapag na-delete ang order — i-refresh
@@ -426,6 +448,37 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.bodyCard}>
+
+        {/* ════ Review Notification Banner ════ */}
+        {reviewNotif && (
+          <TouchableOpacity
+            style={styles.reviewNotifBanner}
+            activeOpacity={0.85}
+            onPress={() => {
+              setReviewNotif(false);
+              setOrderHistoryModal(true);
+            }}
+          >
+            <View style={styles.reviewNotifLeft}>
+              <View style={styles.reviewNotifIconWrap}>
+                <Ionicons name="star" size={20} color="#F59E0B" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.reviewNotifTitle}>Your order has been completed! 🎉</Text>
+                <Text style={styles.reviewNotifSub}>
+                  Tap here to rate your purchased items in Order History.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              onPress={() => setReviewNotif(false)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close" size={18} color="#92400E" />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        )}
+
         {/* Account */}
         <Text style={styles.sectionLabel}>Account</Text>
         <View style={styles.section}>
@@ -939,4 +992,11 @@ const styles = StyleSheet.create({
   charCount: { fontSize: 11, color: "#94A3B8", textAlign: "right", marginTop: -10, marginBottom: 14 },
   notifBadge: { position: "absolute", top: -5, right: -6, backgroundColor: "#E53935", borderRadius: 10, minWidth: 16, height: 16, justifyContent: "center", alignItems: "center", paddingHorizontal: 3 },
   notifBadgeText: { color: "#fff", fontSize: 9, fontWeight: "bold" },
+
+  // ── Review Notification Banner ──
+  reviewNotifBanner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "#FEF3C7", borderWidth: 1.5, borderColor: "#F59E0B", borderRadius: 16, marginHorizontal: 20, marginBottom: 20, padding: 14, gap: 10 },
+  reviewNotifLeft: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
+  reviewNotifIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FDE68A", justifyContent: "center", alignItems: "center", flexShrink: 0 },
+  reviewNotifTitle: { fontSize: 13, fontWeight: "800", color: "#92400E", marginBottom: 2 },
+  reviewNotifSub: { fontSize: 11, color: "#B45309", lineHeight: 15 },
 });
