@@ -10,7 +10,7 @@ import api from "../../config/api";
 import * as ImagePicker from "expo-image-picker";
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "http://192.168.193.222:5000";
+const SOCKET_URL = "http://YOUR_IP_HERE:5000"; // ⚠️ PALITAN ITO NG IYONG IP ADDRESS
 
 interface OrderItem {
   id: string;

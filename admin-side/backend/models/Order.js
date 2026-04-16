@@ -9,6 +9,8 @@ const orderSchema = new mongoose.Schema({
     quantity: Number,
     image: String,
     variant: String,
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    reviewed: { type: Boolean, default: false },
   }],
   grandTotal: { type: Number },
   status: { type: String, default: 'pending' },
