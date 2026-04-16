@@ -1,30 +1,17 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  Modal,
-  TextInput,
-  Image,
-  ActivityIndicator,
-  FlatList,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert,
+  Modal, TextInput, Image, ActivityIndicator, FlatList, Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "../../config/api";
 import * as ImagePicker from "expo-image-picker";
-import { io } from "socket.io-client"; // ✅ Socket.IO
+import { io } from "socket.io-client";
 
-// ✅ I-update ito sa actual na server URL mo
-// Dev: "http://192.168.x.x:5000" (yung IP ng PC mo sa network)
-// Prod: "https://your-deployed-server.com"
-const SOCKET_URL = "http://192.168.1.x:5000"; // ← PALITAN ITO
+const SOCKET_URL = "http://192.168.1.30:5000";
 
-/* ─── Types ──────────────────────────────────────────────── */
 interface OrderItem {
   id: string;
   productId?: string;
@@ -32,38 +19,22 @@ interface OrderItem {
   quantity: number;
   reviewed?: boolean;
 }
-
 interface Order {
-  id: string;
-  _id?: string;
-  userId: string;
-  status: string;
-  items: OrderItem[];
-  shippingFee: number;
-  grandTotal?: number;
-  totalPrice?: number;
-  createdAt?: string;
-  dateReceived?: string;
+  id: string; _id?: string; userId: string; status: string;
+  items: OrderItem[]; shippingFee: number; grandTotal?: number;
+  totalPrice?: number; createdAt?: string; dateReceived?: string;
 }
 
 const getProductId = (item: OrderItem): string =>
-  item.productId || item.id || "";
+  (item as any).product_id || item.productId || item.id || (item as any)._id || "";
 
-const getOrderId = (order: Order): string =>
-  order._id || order.id || "";
+const getOrderId = (order: Order): string => order._id || order.id || "";
 
-/* ─── Star Rating Component ─────────────────────────────── */
-interface StarRatingProps {
-  rating: number;
-  onRate: (star: number) => void;
-  size?: number;
-}
-
-function StarRating({ rating, onRate, size = 32 }: StarRatingProps) {
+function StarRating({ rating, onRate, size = 32 }: { rating: number; onRate: (s: number) => void; size?: number }) {
   return (
     <View style={{ flexDirection: "row", gap: 6 }}>
       {[1, 2, 3, 4, 5].map((s) => (
-        <TouchableOpacity key={s} onPress={() => onRate(s)}>
+        <TouchableOpacity key={s} onPress={() => onRate(s)} activeOpacity={0.7}>
           <Text style={{ fontSize: size, color: s <= rating ? "#F59E0B" : "#E5E7EB" }}>★</Text>
         </TouchableOpacity>
       ))}
@@ -72,133 +43,54 @@ function StarRating({ rating, onRate, size = 32 }: StarRatingProps) {
 }
 
 export default function ProfileScreen() {
-  const [userName, setUserName] = useState<string>("");
-  const [userEmail, setUserEmail] = useState<string>("");
-  const [userPhoto, setUserPhoto] = useState<string>("");
-  const [userId, setUserId] = useState<string>("");
+  const [userName, setUserName]   = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [userPhoto, setUserPhoto] = useState("");
+  const [userId, setUserId]       = useState("");
   const router = useRouter();
 
   const [manageProfileModal, setManageProfileModal] = useState(false);
-  const [passwordModal, setPasswordModal] = useState(false);
-  const [trackOrdersModal, setTrackOrdersModal] = useState(false);
-  const [orderHistoryModal, setOrderHistoryModal] = useState(false);
+  const [passwordModal, setPasswordModal]           = useState(false);
+  const [trackOrdersModal, setTrackOrdersModal]     = useState(false);
+  const [orderHistoryModal, setOrderHistoryModal]   = useState(false);
 
-  const [editName, setEditName] = useState("");
+  const [editName, setEditName]   = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+  const [newPassword, setNewPassword]         = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
+  const [showNew, setShowNew]         = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
-  const [activeOrders, setActiveOrders] = useState<Order[]>([]);
+  const [activeOrders, setActiveOrders]       = useState<Order[]>([]);
   const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
 
-  /* ─── Review State ─── */
-  const [reviewModal, setReviewModal] = useState(false);
-  const [reviewOrder, setReviewOrder] = useState<Order | null>(null);
-  const [reviewItem, setReviewItem] = useState<OrderItem | null>(null);
-  const [reviewRating, setReviewRating] = useState(0);
-  const [reviewComment, setReviewComment] = useState("");
+  const [reviewModal, setReviewModal]         = useState(false);
+  const [reviewOrder, setReviewOrder]         = useState<Order | null>(null);
+  const [reviewItem, setReviewItem]           = useState<OrderItem | null>(null);
+  const [reviewRating, setReviewRating]       = useState(0);
+  const [reviewComment, setReviewComment]     = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
-  /* ─── Notification State ─── */
-  const [reviewNotif, setReviewNotif] = useState(false); // in-app banner
-  const [reviewNotifOrders, setReviewNotifOrders] = useState<Order[]>([]); // orders na pwede na i-review
+  const [reviewNotif, setReviewNotif] = useState(false);
+  const bannerAnim  = useRef(new Animated.Value(-100)).current;
+  const userIdRef   = useRef("");
 
   const unreviewedOrderCount = completedOrders.filter((o) =>
-    o.items?.some((i) => !i.reviewed && getProductId(i))
+    o.items?.some((i) => !i.reviewed)
   ).length;
 
-  // ✅ useCallback para hindi mag-re-create ang function sa bawat render
-  const fetchOrders = useCallback(async () => {
-    try {
-      const userStr = await AsyncStorage.getItem("user");
-      if (!userStr) return;
-      const user = JSON.parse(userStr);
-      const id = user._id || user.id;
-
-      const res = await api.get("/orders");
-      const allOrders: Order[] = res.data
-        .filter((o: Order) => o.userId === id)
-        .map((o: Order) => ({ ...o, id: o._id || o.id }));
-
-      const active = allOrders
-        .filter((o) => ["pending", "processing"].includes(o.status))
-        .sort((a, b) => {
-          if (a.status === "processing" && b.status === "pending") return -1;
-          if (a.status === "pending" && b.status === "processing") return 1;
-          return 0;
-        });
-
-      const completed = allOrders.filter((o) => o.status === "completed");
-
-      setActiveOrders(active);
-      setCompletedOrders(completed);
-    } catch (e) {
-      console.error("fetchOrders error:", e);
-    }
-  }, []);
-
   useEffect(() => {
-    fetchUser();
-    fetchOrders();
-
-    // ✅ Socket.IO — mag-connect at makinig sa order events
-    const socket = io(SOCKET_URL, {
-      transports: ["websocket"],
-    });
-
-    socket.on("connect", () => {
-      console.log("🟢 Socket connected:", socket.id);
-    });
-
-    // ✅ Kapag may bagong order — i-refresh (para makita ng user ang kanyang bagong order)
-    socket.on("new_order", () => {
-      fetchOrders();
-    });
-
-    // ✅ Kapag na-update ang order (e.g. admin nag-change ng status) — i-refresh agad
-    socket.on("order_updated", async (updatedOrder: any) => {
-      await fetchOrders();
-
-      // ✅ NOTIFICATION: Pag naging "completed" ang order ng current user — show banner
-      const userStr = await AsyncStorage.getItem("user");
-      if (!userStr) return;
-      const user = JSON.parse(userStr);
-      const currentUserId = user._id || user.id;
-
-      if (
-        updatedOrder?.status === "completed" &&
-        updatedOrder?.userId === currentUserId
-      ) {
-        setReviewNotifOrders((prev) => {
-          const already = prev.find((o) => (o._id || o.id) === (updatedOrder._id || updatedOrder.id));
-          if (already) return prev;
-          return [...prev, { ...updatedOrder, id: updatedOrder._id || updatedOrder.id }];
-        });
-        setReviewNotif(true);
-      }
-    });
-
-    // ✅ Kapag na-delete ang order — i-refresh
-    socket.on("order_deleted", () => {
-      fetchOrders();
-    });
-
-    socket.on("disconnect", () => {
-      console.log("🔴 Socket disconnected");
-    });
-
-    // ✅ Cleanup kapag nag-unmount ang component
-    return () => {
-      socket.disconnect();
-    };
-  }, [fetchOrders]);
+    if (reviewNotif) {
+      Animated.spring(bannerAnim, { toValue: 0, useNativeDriver: true, speed: 14, bounciness: 5 }).start();
+    } else {
+      Animated.timing(bannerAnim, { toValue: -100, duration: 200, useNativeDriver: true }).start();
+    }
+  }, [reviewNotif]);
 
   const fetchUser = async () => {
     try {
@@ -206,27 +98,65 @@ export default function ProfileScreen() {
       if (!userStr) return;
       const user = JSON.parse(userStr);
       const id = user._id || user.id;
-      setUserId(id);
-      setUserName(user.name ?? "");
-      setUserEmail(user.email ?? "");
-      setUserPhoto(user.photoURL ?? "");
-    } catch (e) {
-      console.error("fetchUser error:", e);
-    }
+      setUserName(user.name || "");
+      setUserEmail(user.email || "");
+      setUserPhoto(user.photo || "");
+      setUserId(id || "");
+      userIdRef.current = id || "";
+    } catch (e) { console.error("fetchUser error:", e); }
   };
 
+  const fetchOrders = useCallback(async () => {
+    try {
+      const userStr = await AsyncStorage.getItem("user");
+      if (!userStr) return;
+      const user = JSON.parse(userStr);
+      const id = user._id || user.id;
+      const res = await api.get("/orders");
+      const allOrders: Order[] = res.data
+        .filter((o: Order) => o.userId === id)
+        .map((o: Order) => ({ ...o, id: o._id || o.id }));
+      setActiveOrders(allOrders.filter((o) => ["pending", "processing"].includes(o.status))
+        .sort((a, b) => (a.status === "processing" ? -1 : b.status === "processing" ? 1 : 0)));
+      setCompletedOrders(allOrders.filter((o) => o.status === "completed"));
+    } catch (e) { console.error("fetchOrders error:", e); }
+  }, []);
+
+  useEffect(() => {
+    fetchUser();
+    fetchOrders();
+
+    const socket = io(SOCKET_URL, {
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+    });
+
+    socket.on("connect", () => console.log("🟢 Profile socket connected:", socket.id));
+    socket.on("connect_error", (err) => console.log("⚠️ Socket error:", err.message));
+    socket.on("disconnect", () => console.log("🔴 Profile socket disconnected"));
+
+    socket.on("order_updated", async (updatedOrder: any) => {
+      await fetchOrders();
+      if (updatedOrder?.status === "completed" && updatedOrder?.userId === userIdRef.current) {
+        setReviewNotif(true);
+      }
+    });
+
+    socket.on("new_order",    () => fetchOrders());
+    socket.on("order_deleted", () => fetchOrders());
+
+    return () => { socket.disconnect(); };
+  }, [fetchOrders]);
+
   const handleLogout = () => {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
+    Alert.alert("Logout", "Are you sure?", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: async () => {
-          await AsyncStorage.removeItem("token");
-          await AsyncStorage.removeItem("user");
-          router.replace("/login");
-        },
-      },
+      { text: "Logout", style: "destructive", onPress: async () => {
+        await AsyncStorage.multiRemove(["token", "user"]);
+        router.replace("/login");
+      }},
     ]);
   };
 
@@ -237,211 +167,143 @@ export default function ProfileScreen() {
   };
 
   const handlePickPhoto = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert("Permission required", "Please allow access to your photos.");
-      return;
-    }
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") { Alert.alert("Permission Denied", "Need photo library access."); return; }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
+      allowsEditing: true, aspect: [1, 1], quality: 0.7, base64: true,
     });
-    if (!result.canceled) setUserPhoto(result.assets[0].uri);
+    if (!result.canceled && result.assets?.[0]) {
+      const { base64, uri } = result.assets[0];
+      setUserPhoto(base64 ? `data:image/jpeg;base64,${base64}` : uri);
+    }
   };
 
   const handleSaveProfile = async () => {
-    if (!editName.trim()) {
-      Alert.alert("Error", "Name cannot be empty.");
-      return;
-    }
+    if (!editName.trim()) { Alert.alert("Error", "Name cannot be empty."); return; }
     setProfileLoading(true);
     try {
-      await api.put(`/users/${userId}`, {
-        name: editName.trim(),
-        email: editEmail.trim(),
-        photoURL: userPhoto,
-      });
+      const updatedUser = { name: editName.trim(), email: editEmail.trim(), photo: userPhoto };
+      await api.put(`/users/${userId}`, updatedUser);
       const userStr = await AsyncStorage.getItem("user");
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        await AsyncStorage.setItem(
-          "user",
-          JSON.stringify({
-            ...user,
-            name: editName.trim(),
-            email: editEmail.trim(),
-            photoURL: userPhoto,
-          })
-        );
-      }
-      setUserName(editName.trim());
-      setUserEmail(editEmail.trim());
+      if (userStr) await AsyncStorage.setItem("user", JSON.stringify({ ...JSON.parse(userStr), ...updatedUser }));
+      setUserName(editName.trim()); setUserEmail(editEmail.trim());
       setManageProfileModal(false);
-      Alert.alert("Success", "Profile updated successfully!");
-    } catch (e) {
-      Alert.alert("Error", (e as Error).message);
-    }
-    setProfileLoading(false);
+      Alert.alert("Success", "Profile updated!");
+    } catch (e) { Alert.alert("Error", (e as Error).message); }
+    finally { setProfileLoading(false); }
   };
 
   const handleChangePassword = async () => {
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      Alert.alert("Error", "Please fill in all fields.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      Alert.alert("Error", "New passwords do not match.");
-      return;
-    }
-    if (newPassword.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters.");
-      return;
-    }
+    if (!currentPassword || !newPassword || !confirmPassword) { Alert.alert("Error", "Fill in all fields."); return; }
+    if (newPassword !== confirmPassword) { Alert.alert("Error", "New passwords do not match."); return; }
+    if (newPassword.length < 6) { Alert.alert("Error", "Password must be at least 6 characters."); return; }
     setPasswordLoading(true);
     try {
-      await api.put(`/users/${userId}/change-password`, {
-        currentPassword,
-        newPassword,
-      });
+      await api.put(`/users/${userId}`, { password: newPassword });
       setPasswordModal(false);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      Alert.alert("Success", "Password changed successfully!");
-    } catch (e: any) {
-      Alert.alert("Error", e.response?.data?.message || e.message);
-    }
-    setPasswordLoading(false);
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+      Alert.alert("Success", "Password changed!");
+    } catch (e) { Alert.alert("Error", (e as Error).message); }
+    finally { setPasswordLoading(false); }
   };
 
   const handleConfirmReceived = async (order: Order) => {
     Alert.alert("Confirm Receipt", "Have you received your order?", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Yes, Received",
-        onPress: async () => {
-          try {
-            const orderId = getOrderId(order);
-            await api.put(`/orders/${orderId}`, {
-              status: "completed",
-              dateReceived: new Date().toISOString(),
-            });
-            await fetchOrders();
-            Alert.alert(
-              "Thank you!",
-              "Order marked as received. You can now leave a review in Order History!"
-            );
-          } catch (e) {
-            Alert.alert("Error", (e as Error).message);
-          }
-        },
-      },
+      { text: "Yes, Received!", onPress: async () => {
+        try {
+          await api.put(`/orders/${getOrderId(order)}`, {
+            status: "completed",
+            dateReceived: new Date().toISOString(),
+          });
+          await fetchOrders();
+          setReviewNotif(true);
+          Alert.alert("🎉 Thank you!", "Order marked as received! Go to Order History to rate your items.");
+        } catch (e) { Alert.alert("Error", (e as Error).message); }
+      }},
     ]);
   };
 
   const openReview = (order: Order, item: OrderItem) => {
-    setReviewOrder(order);
-    setReviewItem(item);
-    setReviewRating(0);
-    setReviewComment("");
+    setReviewOrder(order); setReviewItem(item);
+    setReviewRating(0); setReviewComment("");
     setReviewModal(true);
   };
 
   const handleSubmitReview = async () => {
-    if (reviewRating === 0) {
-      Alert.alert("Rating required", "Please select a star rating before submitting.");
-      return;
-    }
+    if (reviewRating === 0) { Alert.alert("Rating required", "Please select a star rating."); return; }
     if (!reviewItem || !reviewOrder) return;
+
+    console.log("🔍 Review item fields:", JSON.stringify(reviewItem));
+
     const productId = getProductId(reviewItem);
     if (!productId) {
-      Alert.alert("Error", "Could not identify the product.");
+      Alert.alert("Error", `Could not find product ID. Fields found: ${Object.keys(reviewItem).join(", ")}`);
       return;
     }
+
     setReviewSubmitting(true);
     try {
       const orderId = getOrderId(reviewOrder);
-
       await api.post("/reviews", {
-        productId,
-        userId,
-        userName,
-        userPhoto,
-        orderId,
-        rating: reviewRating,
-        comment: reviewComment.trim(),
+        productId, userId, userName, userPhoto, orderId,
+        rating: reviewRating, comment: reviewComment.trim(),
       });
 
-      const updatedItems: OrderItem[] = reviewOrder.items.map((i) =>
+      const updatedItems = reviewOrder.items.map((i) =>
         getProductId(i) === productId ? { ...i, reviewed: true } : i
       );
       await api.put(`/orders/${orderId}`, { items: updatedItems });
 
-      setCompletedOrders((prev) =>
-        prev.map((o) =>
+      // ✅ FIX: Auto-hide banner if no more unreviewed items remain
+      setCompletedOrders((prev) => {
+        const updated = prev.map((o) =>
           getOrderId(o) === orderId ? { ...o, items: updatedItems } : o
-        )
-      );
+        );
+        const stillHasUnreviewed = updated.some((o) =>
+          o.items?.some((i) => !i.reviewed)
+        );
+        if (!stillHasUnreviewed) setReviewNotif(false);
+        return updated;
+      });
 
       setReviewModal(false);
-      Alert.alert("Thank you!", "Your review has been submitted.");
+      setTimeout(() => Alert.alert("⭐ Review Submitted!", "Thank you! Your review is now live."), 300);
     } catch (e) {
-      Alert.alert("Error", (e as Error).message);
-    }
-    setReviewSubmitting(false);
+      Alert.alert("Error", "Failed to submit review. Try again.");
+      console.error("Review submit error:", e);
+    } finally { setReviewSubmitting(false); }
   };
 
-  /* ─── MenuItem ───────────────────────────────────────────── */
   interface MenuItemProps {
     icon: keyof typeof Ionicons.glyphMap;
-    label: string;
-    onPress: () => void;
-    color?: string;
-    badge?: string | number;
+    label: string; onPress: () => void; color?: string; badge?: string | number;
   }
-
   const MenuItem = ({ icon, label, onPress, color = "#333", badge }: MenuItemProps) => (
-    <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+    <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.menuLeft}>
         <Ionicons name={icon} size={20} color={color} />
         <Text style={[styles.menuLabel, { color }]}>{label}</Text>
       </View>
       <View style={styles.menuRight}>
-        {badge !== undefined && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{badge}</Text>
-          </View>
-        )}
+        {badge !== undefined && <View style={styles.badge}><Text style={styles.badgeText}>{badge}</Text></View>}
         <Ionicons name="chevron-forward" size={16} color="#ccc" />
       </View>
     </TouchableOpacity>
   );
 
-  const getTotal = (order: Order) => order.grandTotal ?? order.totalPrice ?? 0;
-
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return "";
-    return new Date(dateStr).toLocaleDateString("en-PH");
-  };
+  const getTotal = (o: Order) => o.grandTotal ?? o.totalPrice ?? 0;
+  const formatDate = (d?: string) => d ? new Date(d).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" }) : "";
+  const ratingLabels = ["", "Poor 😞", "Fair 😐", "Good 😊", "Very Good 😄", "Excellent 🌟"];
 
   return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ flexGrow: 1 }}
-    >
-      {/* Header */}
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
+      {/* ── Header ── */}
       <View style={styles.header}>
         <View style={styles.avatar}>
-          {userPhoto ? (
-            <Image source={{ uri: userPhoto }} style={styles.avatarImage} />
-          ) : (
-            <Text style={styles.avatarText}>
-              {userName ? userName.charAt(0).toUpperCase() : "?"}
-            </Text>
-          )}
+          {userPhoto ? <Image source={{ uri: userPhoto }} style={styles.avatarImage} />
+            : <Text style={styles.avatarText}>{userName ? userName[0].toUpperCase() : "?"}</Text>}
         </View>
         <Text style={styles.userName}>{userName || "User"}</Text>
         <Text style={styles.userEmail}>{userEmail}</Text>
@@ -449,60 +311,43 @@ export default function ProfileScreen() {
 
       <View style={styles.bodyCard}>
 
-        {/* ════ Review Notification Banner ════ */}
+        {/* ── Notification Banner (animated slide down) ── */}
         {reviewNotif && (
-          <TouchableOpacity
-            style={styles.reviewNotifBanner}
-            activeOpacity={0.85}
-            onPress={() => {
-              setReviewNotif(false);
-              setOrderHistoryModal(true);
-            }}
-          >
-            <View style={styles.reviewNotifLeft}>
+          <Animated.View style={[styles.reviewNotifBanner, { transform: [{ translateY: bannerAnim }] }]}>
+            <TouchableOpacity style={styles.reviewNotifInner} activeOpacity={0.85}
+              onPress={() => { setReviewNotif(false); setOrderHistoryModal(true); }}>
               <View style={styles.reviewNotifIconWrap}>
-                <Ionicons name="star" size={20} color="#F59E0B" />
+                <Ionicons name="star" size={22} color="#F59E0B" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.reviewNotifTitle}>Your order has been completed! 🎉</Text>
-                <Text style={styles.reviewNotifSub}>
-                  Tap here to rate your purchased items in Order History.
-                </Text>
+                <Text style={styles.reviewNotifTitle}>Order completed! 🎉</Text>
+                <Text style={styles.reviewNotifSub}>Tap to go to Order History and rate your items.</Text>
               </View>
-            </View>
-            <TouchableOpacity
-              onPress={() => setReviewNotif(false)}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setReviewNotif(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
               <Ionicons name="close" size={18} color="#92400E" />
             </TouchableOpacity>
-          </TouchableOpacity>
+          </Animated.View>
         )}
 
-        {/* Account */}
+        {/* ── Account ── */}
         <Text style={styles.sectionLabel}>Account</Text>
         <View style={styles.section}>
           <MenuItem icon="person-outline" label="Manage Profile" onPress={openManageProfile} />
           <View style={styles.separator} />
-          <MenuItem
-            icon="lock-closed-outline"
-            label="Password & Security"
-            onPress={() => setPasswordModal(true)}
-          />
+          <MenuItem icon="lock-closed-outline" label="Password & Security" onPress={() => setPasswordModal(true)} />
         </View>
 
-        {/* Orders */}
+        {/* ── Orders ── */}
         <Text style={styles.sectionLabel}>Orders</Text>
         <View style={styles.section}>
-          <TouchableOpacity style={styles.menuItem} onPress={() => setTrackOrdersModal(true)}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => setTrackOrdersModal(true)} activeOpacity={0.7}>
             <View style={styles.menuLeft}>
               <View>
                 <Ionicons name="time-outline" size={20} color="#333" />
                 {activeOrders.length > 0 && (
                   <View style={styles.notifBadge}>
-                    <Text style={styles.notifBadgeText}>
-                      {activeOrders.length > 99 ? "99+" : activeOrders.length}
-                    </Text>
+                    <Text style={styles.notifBadgeText}>{activeOrders.length > 99 ? "99+" : activeOrders.length}</Text>
                   </View>
                 )}
               </View>
@@ -510,18 +355,14 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={16} color="#ccc" />
           </TouchableOpacity>
-
           <View style={styles.separator} />
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => setOrderHistoryModal(true)}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => setOrderHistoryModal(true)} activeOpacity={0.7}>
             <View style={styles.menuLeft}>
               <View>
                 <Ionicons name="receipt-outline" size={20} color="#333" />
                 {unreviewedOrderCount > 0 && (
                   <View style={styles.notifBadge}>
-                    <Text style={styles.notifBadgeText}>
-                      {unreviewedOrderCount > 99 ? "99+" : unreviewedOrderCount}
-                    </Text>
+                    <Text style={styles.notifBadgeText}>{unreviewedOrderCount > 99 ? "99+" : unreviewedOrderCount}</Text>
                   </View>
                 )}
               </View>
@@ -531,11 +372,10 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Logout */}
+        {/* ── Logout ── */}
         <View style={styles.section}>
           <MenuItem icon="log-out-outline" label="Logout" onPress={handleLogout} color="#E53935" />
         </View>
-
         <View style={{ height: 40 }} />
       </View>
 
@@ -549,48 +389,18 @@ export default function ProfileScreen() {
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.avatarPicker} onPress={handlePickPhoto}>
-              {userPhoto ? (
-                <Image source={{ uri: userPhoto }} style={styles.avatarLarge} />
-              ) : (
-                <View style={styles.avatarLargePlaceholder}>
-                  <Text style={styles.avatarLargeText}>
-                    {editName ? editName.charAt(0).toUpperCase() : "?"}
-                  </Text>
-                </View>
-              )}
-              <View style={styles.cameraIcon}>
-                <Ionicons name="camera" size={16} color="#fff" />
-              </View>
+            <TouchableOpacity style={styles.avatarPicker} onPress={handlePickPhoto} activeOpacity={0.8}>
+              {userPhoto
+                ? <Image source={{ uri: userPhoto }} style={styles.avatarLarge} />
+                : <View style={styles.avatarLargePlaceholder}><Text style={styles.avatarLargeText}>{editName ? editName[0].toUpperCase() : "?"}</Text></View>}
+              <View style={styles.cameraIcon}><Ionicons name="camera" size={16} color="#fff" /></View>
             </TouchableOpacity>
             <Text style={styles.inputLabel}>Full Name</Text>
-            <TextInput
-              style={styles.input}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="Enter your name"
-              placeholderTextColor="#ccc"
-            />
+            <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Enter your name" placeholderTextColor="#ccc" />
             <Text style={styles.inputLabel}>Email</Text>
-            <TextInput
-              style={styles.input}
-              value={editEmail}
-              onChangeText={setEditEmail}
-              placeholder="Enter your email"
-              placeholderTextColor="#ccc"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <TouchableOpacity
-              style={[styles.saveButton, profileLoading && styles.buttonDisabled]}
-              onPress={handleSaveProfile}
-              disabled={profileLoading}
-            >
-              {profileLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
-              )}
+            <TextInput style={styles.input} value={editEmail} onChangeText={setEditEmail} placeholder="Enter your email" placeholderTextColor="#ccc" keyboardType="email-address" autoCapitalize="none" />
+            <TouchableOpacity style={[styles.saveButton, profileLoading && styles.buttonDisabled]} onPress={handleSaveProfile} disabled={profileLoading}>
+              {profileLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -602,81 +412,25 @@ export default function ProfileScreen() {
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Change Password</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setPasswordModal(false);
-                  setCurrentPassword("");
-                  setNewPassword("");
-                  setConfirmPassword("");
-                }}
-              >
+              <TouchableOpacity onPress={() => { setPasswordModal(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); }}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.inputLabel}>Current Password</Text>
-            <View style={styles.passwordRow}>
-              <TextInput
-                style={styles.passwordInput}
-                value={currentPassword}
-                onChangeText={setCurrentPassword}
-                placeholder="Enter current password"
-                placeholderTextColor="#ccc"
-                secureTextEntry={!showCurrent}
-              />
-              <TouchableOpacity onPress={() => setShowCurrent(!showCurrent)}>
-                <Ionicons
-                  name={showCurrent ? "eye-off-outline" : "eye-outline"}
-                  size={20}
-                  color="#999"
-                />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.inputLabel}>New Password</Text>
-            <View style={styles.passwordRow}>
-              <TextInput
-                style={styles.passwordInput}
-                value={newPassword}
-                onChangeText={setNewPassword}
-                placeholder="Enter new password"
-                placeholderTextColor="#ccc"
-                secureTextEntry={!showNew}
-              />
-              <TouchableOpacity onPress={() => setShowNew(!showNew)}>
-                <Ionicons
-                  name={showNew ? "eye-off-outline" : "eye-outline"}
-                  size={20}
-                  color="#999"
-                />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.inputLabel}>Confirm New Password</Text>
-            <View style={styles.passwordRow}>
-              <TextInput
-                style={styles.passwordInput}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                placeholder="Confirm new password"
-                placeholderTextColor="#ccc"
-                secureTextEntry={!showConfirm}
-              />
-              <TouchableOpacity onPress={() => setShowConfirm(!showConfirm)}>
-                <Ionicons
-                  name={showConfirm ? "eye-off-outline" : "eye-outline"}
-                  size={20}
-                  color="#999"
-                />
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={[styles.saveButton, passwordLoading && styles.buttonDisabled]}
-              onPress={handleChangePassword}
-              disabled={passwordLoading}
-            >
-              {passwordLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.saveButtonText}>Change Password</Text>
-              )}
+            {[
+              { label: "Current Password", value: currentPassword, set: setCurrentPassword, show: showCurrent, toggle: () => setShowCurrent(v => !v) },
+              { label: "New Password",     value: newPassword,     set: setNewPassword,     show: showNew,     toggle: () => setShowNew(v => !v) },
+              { label: "Confirm New",      value: confirmPassword, set: setConfirmPassword, show: showConfirm, toggle: () => setShowConfirm(v => !v) },
+            ].map(({ label, value, set, show, toggle }) => (
+              <View key={label}>
+                <Text style={styles.inputLabel}>{label}</Text>
+                <View style={styles.passwordRow}>
+                  <TextInput style={styles.passwordInput} value={value} onChangeText={set} placeholder={`Enter ${label.toLowerCase()}`} placeholderTextColor="#ccc" secureTextEntry={!show} />
+                  <TouchableOpacity onPress={toggle}><Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={20} color="#999" /></TouchableOpacity>
+                </View>
+              </View>
+            ))}
+            <TouchableOpacity style={[styles.saveButton, passwordLoading && styles.buttonDisabled]} onPress={handleChangePassword} disabled={passwordLoading}>
+              {passwordLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Change Password</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -688,67 +442,39 @@ export default function ProfileScreen() {
           <View style={[styles.modalSheet, styles.modalSheetTall]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Track Orders</Text>
-              <TouchableOpacity onPress={() => setTrackOrdersModal(false)}>
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setTrackOrdersModal(false)}><Ionicons name="close" size={24} color="#333" /></TouchableOpacity>
             </View>
-
             {activeOrders.length === 0 ? (
               <View style={styles.emptyOrders}>
                 <Ionicons name="time-outline" size={60} color="#D4B8A8" />
                 <Text style={styles.emptyOrdersText}>No active orders</Text>
+                <Text style={styles.emptyOrdersSub}>Active orders appear here</Text>
               </View>
             ) : (
-              <FlatList
-                data={activeOrders}
-                keyExtractor={(item) => getOrderId(item)}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 20 }}
+              <FlatList data={activeOrders} keyExtractor={getOrderId} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}
                 renderItem={({ item }) => {
                   const isProcessing = item.status === "processing";
                   return (
                     <View style={styles.orderCard}>
                       <View style={styles.orderCardHeader}>
                         {isProcessing ? (
-                          <View style={styles.shippingBadge}>
-                            <View style={styles.shippingDot} />
-                            <Text style={styles.shippingBadgeText}>Being Shipped</Text>
-                          </View>
+                          <View style={styles.shippingBadge}><View style={styles.shippingDot} /><Text style={styles.shippingBadgeText}>Being Shipped</Text></View>
                         ) : (
-                          <View style={styles.processingBadge}>
-                            <View style={styles.processingDot} />
-                            <Text style={styles.processingBadgeText}>Waiting Confirmation</Text>
-                          </View>
+                          <View style={styles.processingBadge}><View style={styles.processingDot} /><Text style={styles.processingBadgeText}>Waiting Confirmation</Text></View>
                         )}
-                        <Text style={styles.orderDate}>
-                          {isProcessing ? "On its way!" : "Waiting for seller..."}
-                        </Text>
+                        <Text style={styles.orderDate}>{isProcessing ? "On its way! 📦" : "Waiting for seller..."}</Text>
                       </View>
-
-                      {item.items?.map((product, index) => (
-                        <View key={index} style={styles.orderItemRow}>
-                          <Text style={styles.orderItemName} numberOfLines={1}>
-                            {product.name}
-                          </Text>
-                          <Text style={styles.orderItemQty}>x{product.quantity}</Text>
+                      {item.items?.map((p, i) => (
+                        <View key={i} style={styles.orderItemRow}>
+                          <Text style={styles.orderItemName} numberOfLines={1}>{p.name}</Text>
+                          <Text style={styles.orderItemQty}>x{p.quantity}</Text>
                         </View>
                       ))}
-
                       <View style={styles.orderCardDivider} />
-                      <View style={styles.orderTotalsRow}>
-                        <Text style={styles.orderTotalLabel}>Shipping</Text>
-                        <Text style={styles.orderTotalValue}>₱{item.shippingFee}</Text>
-                      </View>
-                      <View style={styles.orderTotalsRow}>
-                        <Text style={styles.orderGrandLabel}>Total</Text>
-                        <Text style={styles.orderGrandValue}>₱{getTotal(item)}</Text>
-                      </View>
-
+                      <View style={styles.orderTotalsRow}><Text style={styles.orderTotalLabel}>Shipping</Text><Text style={styles.orderTotalValue}>₱{item.shippingFee}</Text></View>
+                      <View style={styles.orderTotalsRow}><Text style={styles.orderGrandLabel}>Total</Text><Text style={styles.orderGrandValue}>₱{getTotal(item)}</Text></View>
                       {isProcessing && (
-                        <TouchableOpacity
-                          style={styles.receivedButton}
-                          onPress={() => handleConfirmReceived(item)}
-                        >
+                        <TouchableOpacity style={styles.receivedButton} onPress={() => handleConfirmReceived(item)} activeOpacity={0.85}>
                           <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
                           <Text style={styles.receivedButtonText}>Confirm Received</Text>
                         </TouchableOpacity>
@@ -768,91 +494,64 @@ export default function ProfileScreen() {
           <View style={[styles.modalSheet, styles.modalSheetTall]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Order History</Text>
-              <TouchableOpacity onPress={() => setOrderHistoryModal(false)}>
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setOrderHistoryModal(false)}><Ionicons name="close" size={24} color="#333" /></TouchableOpacity>
             </View>
-
             {unreviewedOrderCount > 0 && (
               <View style={styles.reviewBanner}>
                 <Ionicons name="star" size={15} color="#D97706" />
                 <Text style={styles.reviewBannerText}>
-                  {unreviewedOrderCount} order{unreviewedOrderCount > 1 ? "s" : ""} waiting for
-                  your review!
+                  You have {unreviewedOrderCount} item{unreviewedOrderCount > 1 ? "s" : ""} to review! Rate them below.
                 </Text>
               </View>
             )}
-
             {completedOrders.length === 0 ? (
               <View style={styles.emptyOrders}>
                 <Ionicons name="receipt-outline" size={60} color="#D4B8A8" />
                 <Text style={styles.emptyOrdersText}>No completed orders yet</Text>
+                <Text style={styles.emptyOrdersSub}>Completed orders appear here</Text>
               </View>
             ) : (
-              <FlatList
-                data={completedOrders}
-                keyExtractor={(item) => getOrderId(item)}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 20 }}
+              <FlatList data={completedOrders} keyExtractor={getOrderId} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}
                 renderItem={({ item }) => {
-                  const hasUnreviewed = item.items?.some(
-                    (i) => !i.reviewed && getProductId(i)
-                  );
+                  const hasUnreviewed = item.items?.some((i) => !i.reviewed);
                   return (
                     <View style={[styles.orderCard, hasUnreviewed && styles.orderCardHighlight]}>
                       <View style={styles.orderCardHeader}>
                         <View style={styles.completedBadge}>
+                          <Ionicons name="checkmark-circle" size={12} color="#155724" />
                           <Text style={styles.completedBadgeText}>Completed</Text>
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
-                          <Text style={styles.orderDate}>
-                            Ordered: {formatDate(item.createdAt)}
-                          </Text>
-                          {item.dateReceived && (
-                            <Text style={styles.orderDate}>
-                              Received: {formatDate(item.dateReceived)}
-                            </Text>
-                          )}
+                          <Text style={styles.orderDate}>Ordered: {formatDate(item.createdAt)}</Text>
+                          {item.dateReceived && <Text style={styles.orderDate}>Received: {formatDate(item.dateReceived)}</Text>}
                         </View>
                       </View>
-
-                      {item.items?.map((product, index) => {
-                        const pid = getProductId(product);
-                        return (
-                          <View key={index} style={styles.itemWithReview}>
-                            <View style={styles.orderItemRow}>
-                              <Text style={styles.orderItemName} numberOfLines={1}>
-                                {product.name}
-                              </Text>
-                              <Text style={styles.orderItemQty}>x{product.quantity}</Text>
-                            </View>
-                            {product.reviewed ? (
-                              <View style={styles.reviewedTag}>
-                                <Ionicons name="checkmark-circle" size={13} color="#15803D" />
-                                <Text style={styles.reviewedTagText}>Reviewed</Text>
-                              </View>
-                            ) : pid ? (
-                              <TouchableOpacity
-                                style={styles.reviewButton}
-                                onPress={() => openReview(item, product)}
-                              >
-                                <Ionicons name="star" size={13} color="#F59E0B" />
-                                <Text style={styles.reviewButtonText}>Leave a Review</Text>
-                              </TouchableOpacity>
-                            ) : null}
+                      {item.items?.map((product, index) => (
+                        <View key={index} style={styles.itemWithReview}>
+                          <View style={styles.orderItemRow}>
+                            <Text style={styles.orderItemName} numberOfLines={1}>{product.name}</Text>
+                            <Text style={styles.orderItemQty}>x{product.quantity}</Text>
                           </View>
-                        );
-                      })}
-
+                          {product.reviewed ? (
+                            <View style={styles.reviewedTag}>
+                              <Ionicons name="checkmark-circle" size={13} color="#15803D" />
+                              <Text style={styles.reviewedTagText}>Reviewed ✓</Text>
+                            </View>
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.reviewButton}
+                              onPress={() => openReview(item, product)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="star" size={13} color="#F59E0B" />
+                              <Text style={styles.reviewButtonText}>Leave a Review</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      ))}
                       <View style={styles.orderCardDivider} />
-                      <View style={styles.orderTotalsRow}>
-                        <Text style={styles.orderTotalLabel}>Shipping</Text>
-                        <Text style={styles.orderTotalValue}>₱{item.shippingFee}</Text>
-                      </View>
-                      <View style={styles.orderTotalsRow}>
-                        <Text style={styles.orderGrandLabel}>Total</Text>
-                        <Text style={styles.orderGrandValue}>₱{getTotal(item)}</Text>
-                      </View>
+                      <View style={styles.orderTotalsRow}><Text style={styles.orderTotalLabel}>Shipping</Text><Text style={styles.orderTotalValue}>₱{item.shippingFee}</Text></View>
+                      <View style={styles.orderTotalsRow}><Text style={styles.orderGrandLabel}>Total</Text><Text style={styles.orderGrandValue}>₱{getTotal(item)}</Text></View>
                     </View>
                   );
                 }}
@@ -868,49 +567,34 @@ export default function ProfileScreen() {
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Write a Review</Text>
-              <TouchableOpacity onPress={() => setReviewModal(false)}>
+              <TouchableOpacity onPress={() => setReviewModal(false)} disabled={reviewSubmitting}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
             <View style={styles.reviewProductTag}>
               <Ionicons name="bag-outline" size={16} color="#5C4033" />
-              <Text style={styles.reviewProductName} numberOfLines={1}>
-                {reviewItem?.name}
-              </Text>
+              <Text style={styles.reviewProductName} numberOfLines={2}>{reviewItem?.name}</Text>
             </View>
             <Text style={styles.inputLabel}>Your Rating *</Text>
-            <View style={{ marginBottom: 20 }}>
-              <StarRating rating={reviewRating} onRate={setReviewRating} size={36} />
-              {reviewRating > 0 && (
-                <Text style={styles.ratingLabel}>
-                  {["", "Poor", "Fair", "Good", "Very Good", "Excellent"][reviewRating]}
-                </Text>
-              )}
+            <View style={{ marginBottom: 4 }}>
+              <StarRating rating={reviewRating} onRate={setReviewRating} size={38} />
+              <Text style={styles.ratingLabel}>
+                {reviewRating > 0 ? ratingLabels[reviewRating] : "Tap a star to rate"}
+              </Text>
             </View>
-            <Text style={styles.inputLabel}>Comment (optional)</Text>
+            <Text style={[styles.inputLabel, { marginTop: 16 }]}>Comment (optional)</Text>
             <TextInput
               style={[styles.input, { height: 100, textAlignVertical: "top" }]}
-              value={reviewComment}
-              onChangeText={setReviewComment}
+              value={reviewComment} onChangeText={setReviewComment}
               placeholder="Share your experience with this product..."
-              placeholderTextColor="#ccc"
-              multiline
-              maxLength={300}
+              placeholderTextColor="#ccc" multiline maxLength={300}
             />
             <Text style={styles.charCount}>{reviewComment.length}/300</Text>
             <TouchableOpacity
-              style={[
-                styles.saveButton,
-                (reviewSubmitting || reviewRating === 0) && styles.buttonDisabled,
-              ]}
-              onPress={handleSubmitReview}
-              disabled={reviewSubmitting || reviewRating === 0}
+              style={[styles.saveButton, (reviewSubmitting || reviewRating === 0) && styles.buttonDisabled]}
+              onPress={handleSubmitReview} disabled={reviewSubmitting || reviewRating === 0} activeOpacity={0.85}
             >
-              {reviewSubmitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.saveButtonText}>Submit Review</Text>
-              )}
+              {reviewSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Submit Review ⭐</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -939,7 +623,7 @@ const styles = StyleSheet.create({
   separator: { height: 1, backgroundColor: "#F5F5F5", marginHorizontal: 16 },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: "#fff", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 40 },
-  modalSheetTall: { maxHeight: "85%" },
+  modalSheetTall: { maxHeight: "88%" },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 24 },
   modalTitle: { fontSize: 20, fontWeight: "bold", color: "#333" },
   avatarPicker: { alignSelf: "center", marginBottom: 24, position: "relative" },
@@ -954,8 +638,9 @@ const styles = StyleSheet.create({
   saveButton: { backgroundColor: "#5C4033", borderRadius: 14, paddingVertical: 15, alignItems: "center", marginTop: 8 },
   buttonDisabled: { backgroundColor: "#ccc" },
   saveButtonText: { color: "#fff", fontSize: 15, fontWeight: "bold" },
-  emptyOrders: { alignItems: "center", paddingVertical: 60, gap: 12 },
-  emptyOrdersText: { fontSize: 15, color: "#999" },
+  emptyOrders: { alignItems: "center", paddingVertical: 60, gap: 8 },
+  emptyOrdersText: { fontSize: 15, color: "#999", fontWeight: "600" },
+  emptyOrdersSub: { fontSize: 13, color: "#ccc" },
   reviewBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFBEB", borderWidth: 1, borderColor: "#FDE68A", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
   reviewBannerText: { fontSize: 13, color: "#D97706", fontWeight: "600", flex: 1 },
   orderCard: { backgroundColor: "#FDF6F0", borderRadius: 16, padding: 16, marginBottom: 14 },
@@ -967,11 +652,11 @@ const styles = StyleSheet.create({
   shippingBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FFF7ED", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
   shippingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#F97316" },
   shippingBadgeText: { fontSize: 12, fontWeight: "600", color: "#C2410C" },
-  completedBadge: { backgroundColor: "#D4EDDA", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
+  completedBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#D4EDDA", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
   completedBadgeText: { fontSize: 12, fontWeight: "600", color: "#155724" },
   orderDate: { fontSize: 12, color: "#999" },
-  itemWithReview: { marginBottom: 6 },
-  orderItemRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 3 },
+  itemWithReview: { marginBottom: 8 },
+  orderItemRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
   orderItemName: { fontSize: 14, color: "#333", fontWeight: "500", flex: 1, marginRight: 8 },
   orderItemQty: { fontSize: 13, color: "#999" },
   orderCardDivider: { height: 1, backgroundColor: "#E8D5B7", marginVertical: 10 },
@@ -982,21 +667,19 @@ const styles = StyleSheet.create({
   orderGrandValue: { fontSize: 15, fontWeight: "bold", color: "#5C4033" },
   receivedButton: { backgroundColor: "#5C4033", borderRadius: 12, paddingVertical: 12, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 12 },
   receivedButtonText: { color: "#fff", fontSize: 14, fontWeight: "bold" },
-  reviewButton: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#FFFBEB", borderWidth: 1, borderColor: "#FDE68A", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignSelf: "flex-start", marginBottom: 4 },
+  reviewButton: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#FFFBEB", borderWidth: 1, borderColor: "#FDE68A", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignSelf: "flex-start", marginBottom: 2 },
   reviewButtonText: { fontSize: 12, fontWeight: "700", color: "#D97706" },
   reviewedTag: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 4, alignSelf: "flex-start" },
   reviewedTagText: { fontSize: 12, color: "#15803D", fontWeight: "600" },
-  reviewProductTag: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FDF6F0", borderRadius: 10, padding: 12, marginBottom: 20, borderWidth: 1, borderColor: "#EDD9CC" },
-  reviewProductName: { fontSize: 14, fontWeight: "700", color: "#5C4033", flex: 1 },
-  ratingLabel: { fontSize: 13, color: "#F59E0B", fontWeight: "700", marginTop: 6 },
+  reviewProductTag: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: "#FDF6F0", borderRadius: 10, padding: 12, marginBottom: 20, borderWidth: 1, borderColor: "#EDD9CC" },
+  reviewProductName: { fontSize: 14, fontWeight: "700", color: "#5C4033", flex: 1, lineHeight: 20 },
+  ratingLabel: { fontSize: 13, color: "#F59E0B", fontWeight: "700", marginTop: 8, minHeight: 20 },
   charCount: { fontSize: 11, color: "#94A3B8", textAlign: "right", marginTop: -10, marginBottom: 14 },
   notifBadge: { position: "absolute", top: -5, right: -6, backgroundColor: "#E53935", borderRadius: 10, minWidth: 16, height: 16, justifyContent: "center", alignItems: "center", paddingHorizontal: 3 },
   notifBadgeText: { color: "#fff", fontSize: 9, fontWeight: "bold" },
-
-  // ── Review Notification Banner ──
-  reviewNotifBanner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "#FEF3C7", borderWidth: 1.5, borderColor: "#F59E0B", borderRadius: 16, marginHorizontal: 20, marginBottom: 20, padding: 14, gap: 10 },
-  reviewNotifLeft: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
-  reviewNotifIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FDE68A", justifyContent: "center", alignItems: "center", flexShrink: 0 },
+  reviewNotifBanner: { flexDirection: "row", alignItems: "center", backgroundColor: "#FEF3C7", borderWidth: 1.5, borderColor: "#F59E0B", borderRadius: 16, marginHorizontal: 20, marginBottom: 20, padding: 14, gap: 10 },
+  reviewNotifInner: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
+  reviewNotifIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#FDE68A", justifyContent: "center", alignItems: "center", flexShrink: 0 },
   reviewNotifTitle: { fontSize: 13, fontWeight: "800", color: "#92400E", marginBottom: 2 },
   reviewNotifSub: { fontSize: 11, color: "#B45309", lineHeight: 15 },
 });

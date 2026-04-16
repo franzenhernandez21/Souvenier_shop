@@ -18,7 +18,8 @@ const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 56) / 2;
 
 interface Review {
-  id: string;
+  id?: string;
+  _id?: string; // ✅ FIX: added _id since backend returns this
   userId: string;
   userName: string;
   userPhoto?: string;
@@ -40,11 +41,14 @@ interface RelatedProduct {
   category?: string;
 }
 
-// ✅ FIXED: Helper to ensure HTTPS image URLs (React Native rejects HTTP)
 const safeImageUrl = (url?: string): string => {
   if (!url) return '';
   return url.startsWith('http://') ? url.replace('http://', 'https://') : url;
 };
+
+// ✅ FIX: Helper to get review ID — handles both _id and id from backend
+const getReviewId = (r: Review, index: number): string =>
+  r._id || r.id || String(index);
 
 function Stars({ rating, size = 14 }: { rating: number; size?: number }) {
   return (
@@ -117,7 +121,6 @@ function ProductCard({
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.88}>
       <View style={styles.cardImageContainer}>
-        {/* ✅ FIXED: Safe image with fallback placeholder */}
         {product.image && !imgError ? (
           <Image
             source={{ uri: safeImageUrl(product.image) }}
@@ -187,7 +190,6 @@ export default function ProductDetailScreen() {
 
   const getId = (p: any) => p._id || p.id;
 
-  // ✅ FIXED: Fetch product and sanitize image URL
   useEffect(() => {
     if (!id) return;
     const fetchProduct = async () => {
@@ -197,9 +199,7 @@ export default function ProductDetailScreen() {
           (p: any) => p._id === id || p.id === id
         );
         if (found) {
-          // ✅ FIXED: Sanitize image to HTTPS
           found.image = safeImageUrl(found.image);
-          console.log('Product image URL:', found.image); // debug
         }
         setProduct(found || null);
       } catch (err) {
@@ -212,7 +212,6 @@ export default function ProductDetailScreen() {
     fetchProduct();
   }, [id]);
 
-  // Fetch reviews
   useEffect(() => {
     if (!id) return;
     const fetchReviews = async () => {
@@ -228,7 +227,6 @@ export default function ProductDetailScreen() {
     fetchReviews();
   }, [id]);
 
-  // Fetch related products
   useEffect(() => {
     if (!product) return;
     const fetchRelated = async () => {
@@ -247,7 +245,6 @@ export default function ProductDetailScreen() {
             id: p._id || p.id,
             rating: String(p.rating ?? 0),
             sold: p.sold ?? 0,
-            // ✅ FIXED: Sanitize related product images too
             image: safeImageUrl(p.image),
           }));
         setRelatedProducts(related);
@@ -306,7 +303,6 @@ export default function ProductDetailScreen() {
       >
         {/* ── Main Product Image ── */}
         <View style={styles.imageContainer}>
-          {/* ✅ FIXED: Main image with placeholder fallback */}
           {product.image && !mainImgError ? (
             <Image
               source={{ uri: product.image }}
@@ -439,8 +435,9 @@ export default function ProductDetailScreen() {
             </View>
           ) : (
             <View style={{ gap: 10 }}>
-              {(showAllReviews ? reviews : reviews.slice(0, 5)).map((r) => (
-                <ReviewCard key={r.id} review={r} />
+              {/* ✅ FIX: key now uses _id || id || index — no more undefined key */}
+              {(showAllReviews ? reviews : reviews.slice(0, 5)).map((r, index) => (
+                <ReviewCard key={getReviewId(r, index)} review={r} />
               ))}
               {reviews.length > 5 && (
                 <TouchableOpacity
@@ -483,6 +480,7 @@ export default function ProductDetailScreen() {
             </View>
           ) : (
             <View style={styles.relatedGrid}>
+              {/* ✅ key already correct: rp._id || rp.id */}
               {relatedProducts.map((rp) => (
                 <ProductCard
                   key={rp._id || rp.id}
@@ -545,7 +543,6 @@ const styles = StyleSheet.create({
   backLinkText: { color: "#5C4033", fontWeight: "700", fontSize: 15 },
   imageContainer: { width, height: 340, position: "relative", backgroundColor: "#F5EDE8", overflow: "hidden" },
   productImage: { width: "100%", height: "100%" },
-  // ✅ NEW: Main image placeholder
   mainImagePlaceholder: { width: "100%", height: "100%", justifyContent: "center", alignItems: "center", backgroundColor: "#F5EDE8" },
   outOfStockOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", alignItems: "center" },
   outOfStockText: { color: "#fff", fontWeight: "800", fontSize: 20, letterSpacing: 0.5 },
@@ -593,7 +590,6 @@ const styles = StyleSheet.create({
   card: { width: CARD_WIDTH, backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: "rgba(240,230,224,0.8)" },
   cardImageContainer: { width: "100%", height: 130, position: "relative", backgroundColor: "#F5EDE8" },
   cardImage: { width: "100%", height: "100%" },
-  // ✅ NEW: Card image placeholder
   imagePlaceholder: { width: "100%", height: "100%", justifyContent: "center", alignItems: "center", backgroundColor: "#F5EDE8" },
   cardOutOfStockBadge: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", alignItems: "center" },
   cardOutOfStockText: { color: "#fff", fontWeight: "700", fontSize: 12, letterSpacing: 0.5 },

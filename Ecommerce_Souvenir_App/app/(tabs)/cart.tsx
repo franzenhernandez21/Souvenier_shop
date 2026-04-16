@@ -12,14 +12,20 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCart } from "../../context/CartContext";
 import { router } from "expo-router";
 
-// ✅ Helper para safe ang price parsing
-const parsePrice = (price: string | number): number => {
-  if (typeof price === "number") return price;
-  return parseInt(String(price).replace("₱", "").replace(",", "")) || 0;
+// ✅ Safe price parsing — handles number, string "₱1,500", or garbage input
+const parsePrice = (price: any): number => {
+  if (typeof price === "number") return isNaN(price) ? 0 : price;
+  if (typeof price === "string") {
+    const cleaned = price.replace(/[₱,\s]/g, "");
+    const parsed = parseInt(cleaned, 10);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
 };
 
-// ✅ Helper para consistent ang ID
-const getItemId = (item: any): string => item._id || item.id || item.name || Math.random().toString();
+// ✅ Consistent ID resolution — same logic as CartContext.resolveId
+const resolveId = (item: any): string =>
+  item._id || item.id || item.productId || item.name || Math.random().toString();
 
 export default function CartScreen() {
   const { cartItems, removeFromCart, updateQuantity } = useCart();
@@ -62,13 +68,17 @@ export default function CartScreen() {
       {/* Cart Items */}
       <ScrollView showsVerticalScrollIndicator={false} style={styles.cartList}>
         {cartItems.map((item) => {
-          const itemId = getItemId(item); // ✅ FIXED: safe ID
+          const itemId = resolveId(item);
+          const unitPrice = parsePrice(item.price);
+          const subtotal = unitPrice * item.quantity;
+
           return (
-            <View key={itemId} style={styles.cartItem}> {/* ✅ FIXED: key */}
+            <View key={itemId} style={styles.cartItem}>
               <Image source={{ uri: item.image }} style={styles.itemImage} />
+
               <View style={styles.itemDetails}>
                 <Text style={styles.itemName} numberOfLines={1}>
-                  {item.name}
+                  {String(item.name || "")}
                 </Text>
 
                 {/* Quantity Controls */}
@@ -79,7 +89,11 @@ export default function CartScreen() {
                   >
                     <Ionicons name="remove" size={16} color="#5C4033" />
                   </TouchableOpacity>
-                  <Text style={styles.quantityText}>{item.quantity}</Text>
+
+                  <Text style={styles.quantityText}>
+                    {String(item.quantity)}
+                  </Text>
+
                   <TouchableOpacity
                     style={styles.quantityButton}
                     onPress={() => updateQuantity(itemId, item.quantity + 1)}
@@ -91,11 +105,11 @@ export default function CartScreen() {
 
               {/* Subtotal and Remove */}
               <View style={styles.itemRight}>
-                <TouchableOpacity onPress={() => handleRemove(itemId, item.name)}>
+                <TouchableOpacity onPress={() => handleRemove(itemId, String(item.name || ""))}>
                   <Ionicons name="trash-outline" size={20} color="#E53935" />
                 </TouchableOpacity>
                 <Text style={styles.subtotal}>
-                  ₱{(parsePrice(item.price) * item.quantity).toLocaleString()}
+                  {`₱${subtotal.toLocaleString()}`}
                 </Text>
               </View>
             </View>
@@ -107,7 +121,7 @@ export default function CartScreen() {
       <View style={styles.summary}>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Subtotal</Text>
-          <Text style={styles.summaryValue}>₱{totalPrice.toLocaleString()}</Text>
+          <Text style={styles.summaryValue}>{`₱${totalPrice.toLocaleString()}`}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Shipping</Text>
@@ -116,7 +130,7 @@ export default function CartScreen() {
         <View style={styles.divider} />
         <View style={styles.summaryRow}>
           <Text style={styles.totalLabel}>Total</Text>
-          <Text style={styles.totalValue}>₱{(totalPrice + 30).toLocaleString()}</Text>
+          <Text style={styles.totalValue}>{`₱${(totalPrice + 30).toLocaleString()}`}</Text>
         </View>
         <TouchableOpacity
           style={styles.checkoutButton}
