@@ -2,7 +2,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const api = axios.create({
-  baseURL: 'http://YOUR_IP_HERE:5000/api', // ⚠️ PALITAN ITO NG IYONG IP ADDRESS,
+  baseURL: 'http://192.168.1.30:5000/api',
   timeout: 10000,
 });
 

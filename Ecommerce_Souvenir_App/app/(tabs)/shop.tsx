@@ -17,7 +17,7 @@ import { useRouter } from "expo-router";
 import api from "../../config/api";
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "http://192.168.193.222:5000";
+const SOCKET_URL = "http://192.168.1.30:5000";
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
